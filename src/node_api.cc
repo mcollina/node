@@ -2822,7 +2822,7 @@ napi_status napi_make_callback(napi_env env,
   node::async_context* node_async_context =
     reinterpret_cast<node::async_context*>(async_context);
   if (node_async_context == nullptr) {
-    static node::async_context empty_context = { 0, 0 };
+    static node::async_context empty_context = { 0, 0, v8::Null(isolate).As<v8::Object>() };
     node_async_context = &empty_context;
   }
 

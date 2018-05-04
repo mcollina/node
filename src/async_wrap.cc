@@ -163,6 +163,22 @@ static void DestroyAsyncIdsCallback(void* arg) {
 
 
 void Emit(Environment* env, double async_id, AsyncHooks::Fields type,
+          Local<Function> fn, Local<Object> resource) {
+  AsyncHooks* async_hooks = env->async_hooks();
+
+  if (async_hooks->fields()[type] == 0)
+    return;
+
+  v8::HandleScope handle_scope(env->isolate());
+  Local<Value> argv[] = {
+    Number::New(env->isolate(), async_id),
+    resource
+  };
+  FatalTryCatch try_catch(env);
+  USE(fn->Call(env->context(), Undefined(env->isolate()), 2, argv));
+}
+
+void Emit(Environment* env, double async_id, AsyncHooks::Fields type,
           Local<Function> fn) {
   AsyncHooks* async_hooks = env->async_hooks();
 
@@ -176,9 +192,9 @@ void Emit(Environment* env, double async_id, AsyncHooks::Fields type,
 }
 
 
-void AsyncWrap::EmitPromiseResolve(Environment* env, double async_id) {
+void AsyncWrap::EmitPromiseResolve(Environment* env, double async_id, Local<Object> resource) {
   Emit(env, async_id, AsyncHooks::kPromiseResolve,
-       env->async_hooks_promise_resolve_function());
+       env->async_hooks_promise_resolve_function(), resource);
 }
 
 
@@ -198,9 +214,9 @@ void AsyncWrap::EmitTraceEventBefore() {
 }
 
 
-void AsyncWrap::EmitBefore(Environment* env, double async_id) {
+void AsyncWrap::EmitBefore(Environment* env, double async_id, v8::Local<v8::Object> resource) {
   Emit(env, async_id, AsyncHooks::kBefore,
-       env->async_hooks_before_function());
+       env->async_hooks_before_function(), resource);
 }
 
 
@@ -220,11 +236,11 @@ void AsyncWrap::EmitTraceEventAfter(ProviderType type, double async_id) {
 }
 
 
-void AsyncWrap::EmitAfter(Environment* env, double async_id) {
+void AsyncWrap::EmitAfter(Environment* env, double async_id, Local<Object> resource) {
   // If the user's callback failed then the after() hooks will be called at the
   // end of _fatalException().
   Emit(env, async_id, AsyncHooks::kAfter,
-       env->async_hooks_after_function());
+       env->async_hooks_after_function(), resource);
 }
 
 class PromiseWrap : public AsyncWrap {
@@ -314,10 +330,10 @@ static void PromiseHook(PromiseHookType type, Local<Promise> promise,
     env->async_hooks()->push_async_ids(
       wrap->get_async_id(), wrap->get_trigger_async_id());
     wrap->EmitTraceEventBefore();
-    AsyncWrap::EmitBefore(wrap->env(), wrap->get_async_id());
+    AsyncWrap::EmitBefore(wrap->env(), wrap->get_async_id(), wrap->object());
   } else if (type == PromiseHookType::kAfter) {
     wrap->EmitTraceEventAfter(wrap->provider_type(), wrap->get_async_id());
-    AsyncWrap::EmitAfter(wrap->env(), wrap->get_async_id());
+    AsyncWrap::EmitAfter(wrap->env(), wrap->get_async_id(), wrap->object());
     if (env->execution_async_id() == wrap->get_async_id()) {
       // This condition might not be true if async_hooks was enabled during
       // the promise callback execution.
@@ -327,7 +343,7 @@ static void PromiseHook(PromiseHookType type, Local<Promise> promise,
       env->async_hooks()->pop_async_id(wrap->get_async_id());
     }
   } else if (type == PromiseHookType::kResolve) {
-    AsyncWrap::EmitPromiseResolve(wrap->env(), wrap->get_async_id());
+    AsyncWrap::EmitPromiseResolve(wrap->env(), wrap->get_async_id(), promise);
   }
 }
 
@@ -704,7 +720,7 @@ MaybeLocal<Value> AsyncWrap::MakeCallback(const Local<Function> cb,
   EmitTraceEventBefore();
 
   ProviderType provider = provider_type();
-  async_context context { get_async_id(), get_trigger_async_id() };
+  async_context context { get_async_id(), get_trigger_async_id(), object() };
   MaybeLocal<Value> ret = InternalMakeCallback(
       env(), object(), cb, argc, argv, context);
 
@@ -751,7 +767,8 @@ async_context EmitAsyncInit(Isolate* isolate,
 
   async_context context = {
     env->new_async_id(),  // async_id_
-    trigger_async_id  // trigger_async_id_
+    trigger_async_id,  // trigger_async_id_
+    resource
   };
 
   // Run init hooks

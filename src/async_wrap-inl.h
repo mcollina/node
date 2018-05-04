@@ -50,14 +50,14 @@ inline AsyncWrap::AsyncScope::AsyncScope(AsyncWrap* wrap)
   Environment* env = wrap->env();
   if (env->async_hooks()->fields()[Environment::AsyncHooks::kBefore] == 0)
     return;
-  EmitBefore(env, wrap->get_async_id());
+  EmitBefore(env, wrap->get_async_id(), wrap->object());
 }
 
 inline AsyncWrap::AsyncScope::~AsyncScope() {
   Environment* env = wrap_->env();
   if (env->async_hooks()->fields()[Environment::AsyncHooks::kAfter] == 0)
     return;
-  EmitAfter(env, wrap_->get_async_id());
+  EmitAfter(env, wrap_->get_async_id(), wrap_->object());
 }
 
 

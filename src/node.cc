@@ -917,7 +917,8 @@ InternalCallbackScope::InternalCallbackScope(AsyncWrap* async_wrap)
     : InternalCallbackScope(async_wrap->env(),
                             async_wrap->object(),
                             { async_wrap->get_async_id(),
-                              async_wrap->get_trigger_async_id() }) {}
+                              async_wrap->get_trigger_async_id(),
+                              async_wrap->object() }) {}
 
 InternalCallbackScope::InternalCallbackScope(Environment* env,
                                              Local<Object> object,
@@ -938,7 +939,7 @@ InternalCallbackScope::InternalCallbackScope(Environment* env,
   if (asyncContext.async_id != 0) {
     // No need to check a return value because the application will exit if
     // an exception occurs.
-    AsyncWrap::EmitBefore(env, asyncContext.async_id);
+    AsyncWrap::EmitBefore(env, asyncContext.async_id, asyncContext.resource);
   }
 
   if (!IsInnerMakeCallback()) {
@@ -965,8 +966,9 @@ void InternalCallbackScope::Close() {
   if (failed_) return;
 
   if (async_context_.async_id != 0) {
-    AsyncWrap::EmitAfter(env_, async_context_.async_id);
+    AsyncWrap::EmitAfter(env_, async_context_.async_id, async_context_.resource);
   }
+  async_context_.resource = v8::Null(env_->isolate()).As<v8::Object>();
 
   if (IsInnerMakeCallback()) {
     return;
@@ -1095,7 +1097,7 @@ Local<Value> MakeCallback(Isolate* isolate,
                           Local<Value>* argv) {
   EscapableHandleScope handle_scope(isolate);
   return handle_scope.Escape(
-      MakeCallback(isolate, recv, method, argc, argv, {0, 0})
+      MakeCallback(isolate, recv, method, argc, argv, {0, 0, v8::Null(isolate).As<v8::Object>()})
           .FromMaybe(Local<Value>()));
 }
 
@@ -1107,7 +1109,7 @@ Local<Value> MakeCallback(Isolate* isolate,
     Local<Value>* argv) {
   EscapableHandleScope handle_scope(isolate);
   return handle_scope.Escape(
-      MakeCallback(isolate, recv, symbol, argc, argv, {0, 0})
+      MakeCallback(isolate, recv, symbol, argc, argv, {0, 0, v8::Null(isolate).As<v8::Object>()})
           .FromMaybe(Local<Value>()));
 }
 
@@ -1119,7 +1121,7 @@ Local<Value> MakeCallback(Isolate* isolate,
     Local<Value>* argv) {
   EscapableHandleScope handle_scope(isolate);
   return handle_scope.Escape(
-      MakeCallback(isolate, recv, callback, argc, argv, {0, 0})
+      MakeCallback(isolate, recv, callback, argc, argv, {0, 0, v8::Null(isolate).As<v8::Object>()})
           .FromMaybe(Local<Value>()));
 }
 
@@ -4358,7 +4360,7 @@ void EmitBeforeExit(Environment* env) {
   };
   MakeCallback(env->isolate(),
                process_object, "emit", arraysize(args), args,
-               {0, 0}).ToLocalChecked();
+               {0, 0, v8::Null(env->isolate()).As<v8::Object>()}).ToLocalChecked();
 }
 
 
@@ -4379,7 +4381,7 @@ int EmitExit(Environment* env) {
 
   MakeCallback(env->isolate(),
                process_object, "emit", arraysize(args), args,
-               {0, 0}).ToLocalChecked();
+               {0, 0, v8::Null(env->isolate()).As<v8::Object>()}).ToLocalChecked();
 
   // Reload exit code, it may be changed by `emit('exit')`
   return process_object->Get(exitCode)->Int32Value();
