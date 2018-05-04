@@ -215,6 +215,9 @@ void AsyncWrap::EmitTraceEventBefore() {
 
 
 void AsyncWrap::EmitBefore(Environment* env, double async_id, v8::Local<v8::Object> resource) {
+  v8::Local<v8::Context> context = env->isolate()->GetCurrentContext();
+  context->SetEmbedderData(42, resource);
+
   Emit(env, async_id, AsyncHooks::kBefore,
        env->async_hooks_before_function(), resource);
 }
@@ -237,6 +240,10 @@ void AsyncWrap::EmitTraceEventAfter(ProviderType type, double async_id) {
 
 
 void AsyncWrap::EmitAfter(Environment* env, double async_id, Local<Object> resource) {
+  Isolate* isolate = env->isolate();
+  v8::Local<v8::Context> context = env->isolate()->GetCurrentContext();
+  context->SetEmbedderData(42, v8::Null(isolate));
+
   // If the user's callback failed then the after() hooks will be called at the
   // end of _fatalException().
   Emit(env, async_id, AsyncHooks::kAfter,
@@ -322,6 +329,10 @@ static void PromiseHook(PromiseHookType type, Local<Promise> promise,
       wrap = PromiseWrap::New(env, promise, parent_wrap, silent);
     } else {
       wrap = PromiseWrap::New(env, promise, nullptr, silent);
+
+      // needed for async functions :/
+      // the top level will not emit before and after
+      env->context()->SetEmbedderData(42, wrap->object());
     }
   }
 
@@ -447,6 +458,11 @@ static void RegisterDestroyHook(const FunctionCallbackInfo<Value>& args) {
     p, AsyncWrap::WeakCallback, v8::WeakCallbackType::kParameter);
 }
 
+static void CurrentResource(const FunctionCallbackInfo<Value>& args) {
+  Isolate* isolate = args.GetIsolate();
+  v8::Local<v8::Context> context = isolate->GetCurrentContext();
+  args.GetReturnValue().Set(context->GetEmbedderData(42));
+}
 
 void AsyncWrap::GetAsyncId(const FunctionCallbackInfo<Value>& args) {
   AsyncWrap* wrap;
@@ -511,6 +527,9 @@ void AsyncWrap::Initialize(Local<Object> target,
   env->SetMethod(target, "enablePromiseHook", EnablePromiseHook);
   env->SetMethod(target, "disablePromiseHook", DisablePromiseHook);
   env->SetMethod(target, "registerDestroyHook", RegisterDestroyHook);
+  env->SetMethod(target, "currentResource", CurrentResource);
+
+  context->SetEmbedderData(42, v8::Null(isolate));
 
   v8::PropertyAttribute ReadOnlyDontDelete =
       static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete);
