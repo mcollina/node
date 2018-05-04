@@ -18,7 +18,8 @@ void RunInCallbackScope(const v8::FunctionCallbackInfo<v8::Value>& args) {
 
   node::async_context asyncContext = {
     args[1].As<v8::Number>()->Value(),
-    args[2].As<v8::Number>()->Value()
+    args[2].As<v8::Number>()->Value(),
+    v8::Null(isolate).As<v8::Object>()
   };
 
   node::CallbackScope scope(isolate, args[0].As<v8::Object>(), asyncContext);
@@ -37,7 +38,7 @@ static void Callback(uv_work_t* req, int ignored) {
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::HandleScope scope(isolate);
   node::CallbackScope callback_scope(isolate, v8::Object::New(isolate),
-                                     node::async_context{0, 0});
+                                     node::async_context{0, 0, v8::Null(isolate).As<v8::Object>() });
 
   v8::Local<v8::Promise::Resolver> local =
       v8::Local<v8::Promise::Resolver>::New(isolate, persistent);

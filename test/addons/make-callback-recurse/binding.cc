@@ -20,7 +20,7 @@ void MakeCallback(const FunctionCallbackInfo<Value>& args) {
   Local<Function> method = args[1].As<Function>();
 
   node::MakeCallback(isolate, recv, method, 0, nullptr,
-                     node::async_context{0, 0});
+                     node::async_context{0, 0, v8::Null(isolate).As<v8::Object>() });
 }
 
 void Initialize(Local<Object> exports) {

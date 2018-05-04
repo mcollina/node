@@ -343,7 +343,7 @@ static void PromiseHook(PromiseHookType type, Local<Promise> promise,
       env->async_hooks()->pop_async_id(wrap->get_async_id());
     }
   } else if (type == PromiseHookType::kResolve) {
-    AsyncWrap::EmitPromiseResolve(wrap->env(), wrap->get_async_id(), promise);
+    AsyncWrap::EmitPromiseResolve(wrap->env(), wrap->get_async_id(), wrap->object());
   }
 }
 
