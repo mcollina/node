@@ -242,12 +242,13 @@ void AsyncWrap::EmitTraceEventAfter(ProviderType type, double async_id) {
 void AsyncWrap::EmitAfter(Environment* env, double async_id, Local<Object> resource) {
   Isolate* isolate = env->isolate();
   v8::Local<v8::Context> context = env->isolate()->GetCurrentContext();
-  context->SetEmbedderData(42, v8::Null(isolate));
 
   // If the user's callback failed then the after() hooks will be called at the
   // end of _fatalException().
   Emit(env, async_id, AsyncHooks::kAfter,
        env->async_hooks_after_function(), resource);
+
+  context->SetEmbedderData(42, v8::Null(isolate));
 }
 
 class PromiseWrap : public AsyncWrap {
@@ -464,6 +465,12 @@ static void CurrentResource(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(context->GetEmbedderData(42));
 }
 
+static void SetCurrentResource(const FunctionCallbackInfo<Value>& args) {
+  Isolate* isolate = args.GetIsolate();
+  v8::Local<v8::Context> context = isolate->GetCurrentContext();
+  context->SetEmbedderData(42, args[0]);
+}
+
 void AsyncWrap::GetAsyncId(const FunctionCallbackInfo<Value>& args) {
   AsyncWrap* wrap;
   args.GetReturnValue().Set(-1);
@@ -528,6 +535,7 @@ void AsyncWrap::Initialize(Local<Object> target,
   env->SetMethod(target, "disablePromiseHook", DisablePromiseHook);
   env->SetMethod(target, "registerDestroyHook", RegisterDestroyHook);
   env->SetMethod(target, "currentResource", CurrentResource);
+  env->SetMethod(target, "setCurrentResource", SetCurrentResource);
 
   context->SetEmbedderData(42, v8::Null(isolate));
 

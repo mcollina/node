@@ -20,12 +20,12 @@ void MakeCallback(const v8::FunctionCallbackInfo<v8::Value>& args) {
     auto method = args[1].As<v8::Function>();
     result =
         node::MakeCallback(isolate, recv, method, argv.size(), argv.data(),
-                           node::async_context{0, 0}).ToLocalChecked();
+                           node::async_context{0, 0, v8::Null(isolate).As<v8::Object>()}).ToLocalChecked();
   } else if (args[1]->IsString()) {
     auto method = args[1].As<v8::String>();
     result =
         node::MakeCallback(isolate, recv, method, argv.size(), argv.data(),
-                           node::async_context{0, 0}).ToLocalChecked();
+                           node::async_context{0, 0, v8::Null(isolate).As<v8::Object>()}).ToLocalChecked();
   } else {
     assert(0 && "unreachable");
   }
