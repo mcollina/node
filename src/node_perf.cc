@@ -130,7 +130,7 @@ void PerformanceEntry::Notify(Environment* env,
                        object.As<Object>(),
                        env->performance_entry_callback(),
                        1, &object,
-                       node::async_context{0, 0, v8::Null(env->isolate()).As<v8::Object>()});
+                       node::async_context{0, 0});
   }
 }
 

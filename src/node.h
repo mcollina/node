@@ -570,7 +570,6 @@ typedef double async_id;
 struct async_context {
   ::node::async_id async_id;
   ::node::async_id trigger_async_id;
-  v8::Local<v8::Object> resource;
 };
 
 /* Registers an additional v8::PromiseHook wrapper. This API exists because V8
@@ -631,6 +630,7 @@ class NODE_EXTERN CallbackScope {
  private:
   InternalCallbackScope* private_;
   v8::TryCatch try_catch_;
+  v8::Local<v8::Object> resource_;
 
   void operator=(const CallbackScope&) = delete;
   void operator=(CallbackScope&&) = delete;

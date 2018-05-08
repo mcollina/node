@@ -163,7 +163,8 @@ void PerIsolatePlatformData::RunForegroundTask(std::unique_ptr<Task> task) {
   Isolate* isolate = Isolate::GetCurrent();
   HandleScope scope(isolate);
   Environment* env = Environment::GetCurrent(isolate);
-  InternalCallbackScope cb_scope(env, Local<Object>(), { 0, 0, v8::Null(isolate).As<v8::Object>() },
+  InternalCallbackScope cb_scope(env, Local<Object>(),
+                                 { 0, 0 },
                                  InternalCallbackScope::kAllowEmptyResource);
   task->Run();
 }

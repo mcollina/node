@@ -192,7 +192,8 @@ void Emit(Environment* env, double async_id, AsyncHooks::Fields type,
 }
 
 
-void AsyncWrap::EmitPromiseResolve(Environment* env, double async_id, Local<Object> resource) {
+void AsyncWrap::EmitPromiseResolve(Environment* env, double async_id,
+    Local<Object> resource) {
   Emit(env, async_id, AsyncHooks::kPromiseResolve,
        env->async_hooks_promise_resolve_function(), resource);
 }
@@ -214,7 +215,8 @@ void AsyncWrap::EmitTraceEventBefore() {
 }
 
 
-void AsyncWrap::EmitBefore(Environment* env, double async_id, v8::Local<v8::Object> resource) {
+void AsyncWrap::EmitBefore(Environment* env, double async_id,
+    v8::Local<v8::Object> resource) {
   v8::Local<v8::Context> context = env->isolate()->GetCurrentContext();
   context->SetEmbedderData(42, resource);
 
@@ -239,7 +241,8 @@ void AsyncWrap::EmitTraceEventAfter(ProviderType type, double async_id) {
 }
 
 
-void AsyncWrap::EmitAfter(Environment* env, double async_id, Local<Object> resource) {
+void AsyncWrap::EmitAfter(Environment* env, double async_id,
+    Local<Object> resource) {
   Isolate* isolate = env->isolate();
   v8::Local<v8::Context> context = env->isolate()->GetCurrentContext();
 
@@ -355,7 +358,8 @@ static void PromiseHook(PromiseHookType type, Local<Promise> promise,
       env->async_hooks()->pop_async_id(wrap->get_async_id());
     }
   } else if (type == PromiseHookType::kResolve) {
-    AsyncWrap::EmitPromiseResolve(wrap->env(), wrap->get_async_id(), wrap->object());
+    AsyncWrap::EmitPromiseResolve(wrap->env(), wrap->get_async_id(),
+      wrap->object());
   }
 }
 
@@ -747,7 +751,7 @@ MaybeLocal<Value> AsyncWrap::MakeCallback(const Local<Function> cb,
   EmitTraceEventBefore();
 
   ProviderType provider = provider_type();
-  async_context context { get_async_id(), get_trigger_async_id(), object() };
+  async_context context { get_async_id(), get_trigger_async_id() };
   MaybeLocal<Value> ret = InternalMakeCallback(
       env(), object(), cb, argc, argv, context);
 
@@ -794,8 +798,7 @@ async_context EmitAsyncInit(Isolate* isolate,
 
   async_context context = {
     env->new_async_id(),  // async_id_
-    trigger_async_id,  // trigger_async_id_
-    resource
+    trigger_async_id  // trigger_async_id_
   };
 
   // Run init hooks

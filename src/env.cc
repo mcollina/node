@@ -426,7 +426,7 @@ void Environment::CheckImmediate(uv_check_t* handle) {
                  env->immediate_callback_function(),
                  0,
                  nullptr,
-                 {0, 0, v8::Null(env->isolate()).As<v8::Object>()}).ToLocalChecked();
+                 {0, 0}).ToLocalChecked();
   } while (env->immediate_info()->has_outstanding());
 
   if (env->immediate_info()->ref_count() == 0)

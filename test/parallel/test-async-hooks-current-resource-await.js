@@ -1,6 +1,6 @@
 'use strict';
 
-const sleep = require('util').promisify(setTimeout)
+const sleep = require('util').promisify(setTimeout);
 const assert = require('assert');
 const common = require('../common');
 const { currentResource, createHook } = require('async_hooks');
@@ -13,7 +13,7 @@ const id = Symbol('id');
 
 createHook({
   init(asyncId, type, triggerAsyncId, resource) {
-    var cr = currentResource();
+    const cr = currentResource();
     resource[id] = asyncId;
     if (cr) {
       resource[sym] = cr[sym];
@@ -21,7 +21,7 @@ createHook({
   }
 }).enable();
 
-async function handler (req, res) {
+async function handler(req, res) {
   currentResource()[sym] = { state: req.url };
   await sleep(10);
   const { state } = currentResource()[sym];
@@ -29,12 +29,12 @@ async function handler (req, res) {
   res.end(JSON.stringify({ state }));
 }
 
-const server = createServer(function (req, res) {
+const server = createServer(function(req, res) {
   handler(req, res);
 });
 
 function test(n) {
-  get(`http://localhost:${server.address().port}/${n}`, common.mustCall(function (res) {
+  get(`http://localhost:${server.address().port}/${n}`, common.mustCall(function(res) {
     res.setEncoding('utf8');
 
     let body = '';
@@ -43,7 +43,7 @@ function test(n) {
     });
 
     res.on('end', common.mustCall(function() {
-      assert.deepEqual(JSON.parse(body), { state: `/${n}` });
+      assert.deepStrictEqual(JSON.parse(body), { state: `/${n}` });
     }));
   }));
 }
