@@ -630,7 +630,6 @@ class NODE_EXTERN CallbackScope {
  private:
   InternalCallbackScope* private_;
   v8::TryCatch try_catch_;
-  v8::Local<v8::Object> resource_;
 
   void operator=(const CallbackScope&) = delete;
   void operator=(CallbackScope&&) = delete;

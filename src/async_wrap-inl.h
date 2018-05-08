@@ -57,7 +57,7 @@ inline AsyncWrap::AsyncScope::~AsyncScope() {
   Environment* env = wrap_->env();
   if (env->async_hooks()->fields()[Environment::AsyncHooks::kAfter] == 0)
     return;
-  EmitAfter(env, wrap_->get_async_id(), wrap_->object());
+  EmitAfter(env, wrap_->get_async_id());
 }
 
 

@@ -965,7 +965,7 @@ void InternalCallbackScope::Close() {
   if (failed_) return;
 
   if (async_context_.async_id != 0) {
-    AsyncWrap::EmitAfter(env_, async_context_.async_id, object_);
+    AsyncWrap::EmitAfter(env_, async_context_.async_id);
   }
 
   if (IsInnerMakeCallback()) {
@@ -1095,8 +1095,8 @@ Local<Value> MakeCallback(Isolate* isolate,
                           Local<Value>* argv) {
   EscapableHandleScope handle_scope(isolate);
   return handle_scope.Escape(
-      MakeCallback(isolate, recv, method, argc, argv,
-        {0, 0}).FromMaybe(Local<Value>()));
+      MakeCallback(isolate, recv, method, argc, argv, {0, 0})
+          .FromMaybe(Local<Value>()));
 }
 
 
@@ -1107,8 +1107,8 @@ Local<Value> MakeCallback(Isolate* isolate,
     Local<Value>* argv) {
   EscapableHandleScope handle_scope(isolate);
   return handle_scope.Escape(
-      MakeCallback(isolate, recv, symbol, argc, argv,
-        {0, 0}).FromMaybe(Local<Value>()));
+      MakeCallback(isolate, recv, symbol, argc, argv, {0, 0})
+          .FromMaybe(Local<Value>()));
 }
 
 
@@ -1119,8 +1119,8 @@ Local<Value> MakeCallback(Isolate* isolate,
     Local<Value>* argv) {
   EscapableHandleScope handle_scope(isolate);
   return handle_scope.Escape(
-      MakeCallback(isolate, recv, callback, argc, argv,
-        {0, 0}).FromMaybe(Local<Value>()));
+      MakeCallback(isolate, recv, callback, argc, argv, {0, 0})
+          .FromMaybe(Local<Value>()));
 }
 
 

@@ -163,22 +163,6 @@ static void DestroyAsyncIdsCallback(void* arg) {
 
 
 void Emit(Environment* env, double async_id, AsyncHooks::Fields type,
-          Local<Function> fn, Local<Object> resource) {
-  AsyncHooks* async_hooks = env->async_hooks();
-
-  if (async_hooks->fields()[type] == 0)
-    return;
-
-  v8::HandleScope handle_scope(env->isolate());
-  Local<Value> argv[] = {
-    Number::New(env->isolate(), async_id),
-    resource
-  };
-  FatalTryCatch try_catch(env);
-  USE(fn->Call(env->context(), Undefined(env->isolate()), 2, argv));
-}
-
-void Emit(Environment* env, double async_id, AsyncHooks::Fields type,
           Local<Function> fn) {
   AsyncHooks* async_hooks = env->async_hooks();
 
@@ -192,10 +176,9 @@ void Emit(Environment* env, double async_id, AsyncHooks::Fields type,
 }
 
 
-void AsyncWrap::EmitPromiseResolve(Environment* env, double async_id,
-    Local<Object> resource) {
+void AsyncWrap::EmitPromiseResolve(Environment* env, double async_id) {
   Emit(env, async_id, AsyncHooks::kPromiseResolve,
-       env->async_hooks_promise_resolve_function(), resource);
+       env->async_hooks_promise_resolve_function());
 }
 
 
@@ -221,7 +204,7 @@ void AsyncWrap::EmitBefore(Environment* env, double async_id,
   context->SetEmbedderData(42, resource);
 
   Emit(env, async_id, AsyncHooks::kBefore,
-       env->async_hooks_before_function(), resource);
+       env->async_hooks_before_function());
 }
 
 
@@ -241,15 +224,14 @@ void AsyncWrap::EmitTraceEventAfter(ProviderType type, double async_id) {
 }
 
 
-void AsyncWrap::EmitAfter(Environment* env, double async_id,
-    Local<Object> resource) {
+void AsyncWrap::EmitAfter(Environment* env, double async_id) {
   Isolate* isolate = env->isolate();
   v8::Local<v8::Context> context = env->isolate()->GetCurrentContext();
 
   // If the user's callback failed then the after() hooks will be called at the
   // end of _fatalException().
   Emit(env, async_id, AsyncHooks::kAfter,
-       env->async_hooks_after_function(), resource);
+       env->async_hooks_after_function());
 
   context->SetEmbedderData(42, v8::Null(isolate));
 }
@@ -348,7 +330,7 @@ static void PromiseHook(PromiseHookType type, Local<Promise> promise,
     AsyncWrap::EmitBefore(wrap->env(), wrap->get_async_id(), wrap->object());
   } else if (type == PromiseHookType::kAfter) {
     wrap->EmitTraceEventAfter(wrap->provider_type(), wrap->get_async_id());
-    AsyncWrap::EmitAfter(wrap->env(), wrap->get_async_id(), wrap->object());
+    AsyncWrap::EmitAfter(wrap->env(), wrap->get_async_id());
     if (env->execution_async_id() == wrap->get_async_id()) {
       // This condition might not be true if async_hooks was enabled during
       // the promise callback execution.
@@ -358,8 +340,7 @@ static void PromiseHook(PromiseHookType type, Local<Promise> promise,
       env->async_hooks()->pop_async_id(wrap->get_async_id());
     }
   } else if (type == PromiseHookType::kResolve) {
-    AsyncWrap::EmitPromiseResolve(wrap->env(), wrap->get_async_id(),
-      wrap->object());
+    AsyncWrap::EmitPromiseResolve(wrap->env(), wrap->get_async_id());
   }
 }
 
