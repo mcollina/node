@@ -2,16 +2,16 @@
 
 const assert = require('assert');
 const common = require('../common');
-const { currentResource, createHook } = require('async_hooks');
+const { executionAsyncResource, createHook } = require('async_hooks');
 const { createServer, get } = require('http');
 const sym = Symbol('cls');
 const id = Symbol('id');
 
-// tests continuation local storage with the currentResource API
+// tests continuation local storage with the executionAsyncResource API
 
 createHook({
   init(asyncId, type, triggerAsyncId, resource) {
-    const cr = currentResource();
+    const cr = executionAsyncResource();
     resource[id] = asyncId;
     if (cr) {
       resource[sym] = cr[sym];
@@ -20,9 +20,9 @@ createHook({
 }).enable();
 
 const server = createServer(function(req, res) {
-  currentResource()[sym] = { state: req.url };
+  executionAsyncResource()[sym] = { state: req.url };
   setTimeout(function() {
-    const { state } = currentResource()[sym];
+    const { state } = executionAsyncResource()[sym];
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify({ state }));
   }, 10);
