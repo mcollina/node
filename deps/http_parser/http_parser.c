@@ -52,6 +52,7 @@ static uint32_t max_header_size = HTTP_MAX_HEADER_SIZE;
 #define SET_ERRNO(e)                                                 \
 do {                                                                 \
   parser->http_errno = (e);                                          \
+  parser->nread = 0;                                                 \
 } while(0)
 
 #define CURRENT_STATE() p_state
