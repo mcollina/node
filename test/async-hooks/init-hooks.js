@@ -166,7 +166,7 @@ class ActivityCollector {
         // callback, so we don't yield errors for these.
         return null;
       }
-      const err = new Error(`Found a handle whose ${hook}` +
+      const err = new Error(`Found a handle (${uid}) whose ${hook}` +
                             ' hook was invoked but not its init hook');
       throw err;
     }
