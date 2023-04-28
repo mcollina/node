@@ -905,6 +905,7 @@ class SynchronousWorker final : public MemoryRetainer {
   static void IsLoopAlive(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SignalStop(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Stop(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void TryCloseAllHandles(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void RunInCallbackScope(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
@@ -974,6 +975,7 @@ Local<FunctionTemplate> SynchronousWorker::GetConstructorTemplate(
     SetProtoMethod(isolate, tmpl, "runLoop", RunLoop);
     SetProtoMethod(isolate, tmpl, "isLoopAlive", IsLoopAlive);
     SetProtoMethod(isolate, tmpl, "runInCallbackScope", RunInCallbackScope);
+    SetProtoMethod(isolate, tmpl, "tryCloseAllHandles", TryCloseAllHandles);
 
     env->set_synchronousworker_constructor_template(tmpl);
   }
@@ -1003,6 +1005,7 @@ void SynchronousWorker::RegisterExternalReferences(
   registry->Register(SignalStop);
   registry->Register(Stop);
   registry->Register(RunInCallbackScope);
+  registry->Register(TryCloseAllHandles);
 }
 
 SynchronousWorker::SynchronousWorkerScope::SynchronousWorkerScope(
@@ -1054,6 +1057,24 @@ void SynchronousWorker::Start(const FunctionCallbackInfo<Value>& args) {
   if (self == nullptr) return;
   self->Start(args[0]->BooleanValue(args.GetIsolate()),
               args[1]->BooleanValue(args.GetIsolate()));
+}
+
+void SynchronousWorker::TryCloseAllHandles(const FunctionCallbackInfo<Value>& args) {
+  auto localHandleFound = false;
+  SynchronousWorker* self = Unwrap(args);
+  if (self->env_ != nullptr) {
+    auto env = self->env_;
+    for (auto w : *env->handle_wrap_queue()) {
+      Local<Object> obj = w->GetOwner();
+      Local<Context> localContext = obj->GetCreationContextChecked();
+      if (localContext == self->context_) {
+        localHandleFound = true;
+        w->Close();
+      }
+    }
+  }
+  // printf("TryCloseAllHandles: %d\n", localHandleFound);
+  args.GetReturnValue().Set(v8::Boolean::New(self->isolate_, localHandleFound));
 }
 
 void SynchronousWorker::Stop(const FunctionCallbackInfo<Value>& args) {
@@ -1216,15 +1237,6 @@ void SynchronousWorker::SignalStop() {
 }
 
 void SynchronousWorker::Stop(bool may_throw) {
-  if (loop_.data == nullptr) {
-    // If running in shared-event-loop mode, spin the outer event loop
-    // until all currently pending items have been addressed, so that
-    // FreeEnvironment() does not run the outer loop's handles.
-    TryCatch try_catch(isolate_);
-    try_catch.SetVerbose(true);
-    SealHandleScope seal_handle_scope(isolate_);
-    uv_run(GetCurrentEventLoop(isolate_), UV_RUN_NOWAIT);
-  }
   if (env_ != nullptr) {
     if (!signaled_stop_) {
       SignalStop();
@@ -1370,6 +1382,7 @@ void CreateWorkerPerContextProperties(Local<Object> target,
                                       void* priv) {
   Environment* env = Environment::GetCurrent(context);
   Isolate* isolate = env->isolate();
+  SynchronousWorker::Initialize(env, target);
 
   target
       ->Set(env->context(),
