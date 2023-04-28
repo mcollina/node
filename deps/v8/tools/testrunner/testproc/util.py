@@ -7,6 +7,7 @@ import heapq
 import logging
 import os
 import platform
+import re
 import signal
 import subprocess
 
@@ -51,6 +52,28 @@ def kill_processes_linux():
       os.kill(pid, signal.SIGKILL)
     except:
       logging.exception('Failed to kill process')
+
+
+def base_test_record(test, result, run):
+  record = {
+      'expected': test.expected_outcomes,
+      'flags': result.cmd.args,
+      'framework_name': test.framework_name,
+      'name': test.full_name,
+      'random_seed': test.random_seed,
+      'run': run + 1,
+      'shard_id': test.shard_id,
+      'shard_count': test.shard_count,
+      'target_name': test.get_shell(),
+      'variant': test.variant,
+      'variant_flags': test.variant_flags,
+  }
+  if result.output:
+    record.update(
+        exit_code=result.output.exit_code,
+        duration=result.output.duration,
+    )
+  return record
 
 
 class FixedSizeTopList():

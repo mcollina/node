@@ -4,7 +4,11 @@
 
 #include "src/heap/cppgc/heap-base.h"
 
+#include <memory>
+
 #include "include/cppgc/heap-consistency.h"
+#include "include/cppgc/platform.h"
+#include "src/base/logging.h"
 #include "src/base/platform/platform.h"
 #include "src/base/sanitizer/lsan-page-allocator.h"
 #include "src/heap/base/stack.h"
@@ -169,10 +173,13 @@ size_t HeapBase::ExecutePreFinalizers() {
 #if defined(CPPGC_YOUNG_GENERATION)
 void HeapBase::EnableGenerationalGC() {
   DCHECK(in_atomic_pause());
+  if (HeapHandle::is_young_generation_enabled_) return;
   // Notify the global flag that the write barrier must always be enabled.
   YoungGenerationEnabler::Enable();
   // Enable young generation for the current heap.
   HeapHandle::is_young_generation_enabled_ = true;
+  // Assume everything that has so far been allocated is young.
+  object_allocator_.MarkAllPagesAsYoung();
 }
 
 void HeapBase::ResetRememberedSet() {
@@ -250,18 +257,16 @@ void HeapBase::Terminate() {
 #endif  // defined(CPPGC_YOUNG_GENERATION)
 
     in_atomic_pause_ = true;
-    stats_collector()->NotifyMarkingStarted(
-        GarbageCollector::Config::CollectionType::kMajor,
-        GarbageCollector::Config::MarkingType::kAtomic,
-        GarbageCollector::Config::IsForcedGC::kForced);
+    stats_collector()->NotifyMarkingStarted(CollectionType::kMajor,
+                                            GCConfig::MarkingType::kAtomic,
+                                            GCConfig::IsForcedGC::kForced);
     object_allocator().ResetLinearAllocationBuffers();
     stats_collector()->NotifyMarkingCompleted(0);
     ExecutePreFinalizers();
     // TODO(chromium:1029379): Prefinalizers may black-allocate objects (under a
     // compile-time option). Run sweeping with forced finalization here.
-    sweeper().Start(
-        {Sweeper::SweepingConfig::SweepingType::kAtomic,
-         Sweeper::SweepingConfig::CompactableSpaceHandling::kSweep});
+    sweeper().Start({SweepingConfig::SweepingType::kAtomic,
+                     SweepingConfig::CompactableSpaceHandling::kSweep});
     in_atomic_pause_ = false;
 
     sweeper().NotifyDoneIfNeeded();

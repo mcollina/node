@@ -93,6 +93,10 @@ class V8_EXPORT_PRIVATE CompilationDependencies : public ZoneObject {
   // Record the assumption that {site}'s {ElementsKind} doesn't change.
   void DependOnElementsKind(const AllocationSiteRef& site);
 
+  // Check that an object slot will not change during compilation.
+  void DependOnObjectSlotValue(const HeapObjectRef& object, int offset,
+                               const ObjectRef& value);
+
   void DependOnOwnConstantElement(const JSObjectRef& holder, uint32_t index,
                                   const ObjectRef& element);
 
@@ -114,14 +118,13 @@ class V8_EXPORT_PRIVATE CompilationDependencies : public ZoneObject {
   // up to (and including) the {last_prototype}.
   void DependOnStablePrototypeChains(
       ZoneVector<MapRef> const& receiver_maps, WhereToStart start,
-      base::Optional<JSObjectRef> last_prototype =
-          base::Optional<JSObjectRef>());
+      OptionalJSObjectRef last_prototype = OptionalJSObjectRef());
 
   // For the given map, depend on the stability of (the maps of) all prototypes
   // up to (and including) the {last_prototype}.
-  void DependOnStablePrototypeChain(MapRef receiver_maps, WhereToStart start,
-                                    base::Optional<JSObjectRef> last_prototype =
-                                        base::Optional<JSObjectRef>());
+  void DependOnStablePrototypeChain(
+      MapRef receiver_maps, WhereToStart start,
+      OptionalJSObjectRef last_prototype = OptionalJSObjectRef());
 
   // Like DependOnElementsKind but also applies to all nested allocation sites.
   void DependOnElementsKinds(const AllocationSiteRef& site);

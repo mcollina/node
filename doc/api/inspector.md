@@ -34,7 +34,7 @@ const inspector = require('node:inspector');
 > Stability: 1 - Experimental
 
 <!-- YAML
-added: REPLACEME
+added: v19.0.0
 -->
 
 ### Class: `inspector.Session`
@@ -53,6 +53,10 @@ added: v8.0.0
 Create a new instance of the `inspector.Session` class. The inspector session
 needs to be connected through [`session.connect()`][] before the messages
 can be dispatched to the inspector backend.
+
+When using `Session`, the object outputted by the console API will not be
+released, unless we performed manually `Runtime.DiscardConsoleEntries`
+command.
 
 #### Event: `'inspectorNotification'`
 
@@ -125,7 +129,7 @@ enabled agents or configured breakpoints.
 #### `session.post(method[, params])`
 
 <!-- YAML
-added: REPLACEME
+added: v19.0.0
 -->
 
 * `method` {string}
@@ -144,7 +148,7 @@ try {
 } catch (error) {
   console.error(error);
 }
-// Output: { type: 'number', value: 4, description: '4' }
+// Output: { result: { type: 'number', value: 4, description: '4' } }
 ```
 
 The latest version of the V8 inspector protocol is published on the
@@ -222,6 +226,10 @@ added: v8.0.0
 Create a new instance of the `inspector.Session` class. The inspector session
 needs to be connected through [`session.connect()`][] before the messages
 can be dispatched to the inspector backend.
+
+When using `Session`, the object outputted by the console API will not be
+released, unless we performed manually `Runtime.DiscardConsoleEntries`
+command.
 
 #### Event: `'inspectorNotification'`
 
@@ -324,6 +332,10 @@ Node.js inspector supports all the Chrome DevTools Protocol domains declared
 by V8. Chrome DevTools Protocol domain provides an interface for interacting
 with one of the runtime agents used to inspect the application state and listen
 to the run-time events.
+
+You can not set `reportProgress` to `true` when sending a
+`HeapProfiler.takeHeapSnapshot` or `HeapProfiler.stopTrackingHeapObjects`
+command to V8.
 
 #### Example usage
 

@@ -44,7 +44,10 @@
 #include "src/codegen/compiler.h"
 #include "src/codegen/optimized-compilation-info.h"
 #include "src/common/globals.h"
+#include "src/init/v8.h"
+#ifdef V8_ENABLE_TURBOFAN
 #include "src/compiler/pipeline.h"
+#endif  // V8_ENABLE_TURBOFAN
 #include "src/flags/flags.h"
 #include "src/objects/objects-inl.h"
 #include "src/trap-handler/trap-handler.h"
@@ -117,12 +120,12 @@ void CcTest::Run(const char* snapshot_directory) {
   } else {
     platform = std::move(underlying_default_platform);
   }
-  v8::V8::InitializePlatform(platform.get());
+  i::V8::InitializePlatformForTesting(platform.get());
   cppgc::InitializeProcess(platform->GetPageAllocator());
 
   // Allow changing flags in cctests.
   // TODO(12887): Fix tests to avoid changing flag values after initialization.
-  i::FLAG_freeze_flags_after_init = false;
+  i::v8_flags.freeze_flags_after_init = false;
 
   v8::V8::Initialize();
   v8::V8::InitializeExternalStartupData(snapshot_directory);
@@ -221,7 +224,8 @@ void CcTest::PreciseCollectAllGarbage(i::Isolate* isolate) {
 
 void CcTest::CollectSharedGarbage(i::Isolate* isolate) {
   i::Isolate* iso = isolate ? isolate : i_isolate();
-  iso->heap()->CollectSharedGarbage(i::GarbageCollectionReason::kTesting);
+  iso->heap()->CollectGarbageShared(iso->main_thread_local_heap(),
+                                    i::GarbageCollectionReason::kTesting);
 }
 
 i::Handle<i::String> CcTest::MakeString(const char* str) {
@@ -310,6 +314,7 @@ HandleAndZoneScope::HandleAndZoneScope(bool support_zone_compression)
 
 HandleAndZoneScope::~HandleAndZoneScope() = default;
 
+#ifdef V8_ENABLE_TURBOFAN
 i::Handle<i::JSFunction> Optimize(
     i::Handle<i::JSFunction> function, i::Zone* zone, i::Isolate* isolate,
     uint32_t flags, std::unique_ptr<i::compiler::JSHeapBroker>* out_broker) {
@@ -332,14 +337,13 @@ i::Handle<i::JSFunction> Optimize(
   CHECK(info.shared_info()->HasBytecodeArray());
   i::JSFunction::EnsureFeedbackVector(isolate, function, &is_compiled_scope);
 
-  i::Handle<i::CodeT> code = i::ToCodeT(
+  i::Handle<i::Code> code =
       i::compiler::Pipeline::GenerateCodeForTesting(&info, isolate, out_broker)
-          .ToHandleChecked(),
-      isolate);
-  info.native_context().AddOptimizedCode(*code);
+          .ToHandleChecked();
   function->set_code(*code, v8::kReleaseStore);
   return function;
 }
+#endif  // V8_ENABLE_TURBOFAN
 
 static void PrintTestList() {
   int test_num = 0;
@@ -435,13 +439,16 @@ bool IsValidUnwrapObject(v8::Object* object) {
 }
 
 ManualGCScope::ManualGCScope(i::Isolate* isolate)
-    : flag_concurrent_marking_(i::FLAG_concurrent_marking),
-      flag_concurrent_sweeping_(i::FLAG_concurrent_sweeping),
-      flag_stress_concurrent_allocation_(i::FLAG_stress_concurrent_allocation),
-      flag_stress_incremental_marking_(i::FLAG_stress_incremental_marking),
-      flag_parallel_marking_(i::FLAG_parallel_marking),
+    : flag_concurrent_marking_(i::v8_flags.concurrent_marking),
+      flag_concurrent_sweeping_(i::v8_flags.concurrent_sweeping),
+      flag_concurrent_minor_mc_marking_(
+          i::v8_flags.concurrent_minor_mc_marking),
+      flag_stress_concurrent_allocation_(
+          i::v8_flags.stress_concurrent_allocation),
+      flag_stress_incremental_marking_(i::v8_flags.stress_incremental_marking),
+      flag_parallel_marking_(i::v8_flags.parallel_marking),
       flag_detect_ineffective_gcs_near_heap_limit_(
-          i::FLAG_detect_ineffective_gcs_near_heap_limit) {
+          i::v8_flags.detect_ineffective_gcs_near_heap_limit) {
   // Some tests run threaded (back-to-back) and thus the GC may already be
   // running by the time a ManualGCScope is created. Finalizing existing marking
   // prevents any undefined/unexpected behavior.
@@ -449,22 +456,24 @@ ManualGCScope::ManualGCScope(i::Isolate* isolate)
     CcTest::CollectGarbage(i::OLD_SPACE, isolate);
   }
 
-  i::FLAG_concurrent_marking = false;
-  i::FLAG_concurrent_sweeping = false;
-  i::FLAG_stress_incremental_marking = false;
-  i::FLAG_stress_concurrent_allocation = false;
+  i::v8_flags.concurrent_marking = false;
+  i::v8_flags.concurrent_sweeping = false;
+  i::v8_flags.concurrent_minor_mc_marking = false;
+  i::v8_flags.stress_incremental_marking = false;
+  i::v8_flags.stress_concurrent_allocation = false;
   // Parallel marking has a dependency on concurrent marking.
-  i::FLAG_parallel_marking = false;
-  i::FLAG_detect_ineffective_gcs_near_heap_limit = false;
+  i::v8_flags.parallel_marking = false;
+  i::v8_flags.detect_ineffective_gcs_near_heap_limit = false;
 }
 
 ManualGCScope::~ManualGCScope() {
-  i::FLAG_concurrent_marking = flag_concurrent_marking_;
-  i::FLAG_concurrent_sweeping = flag_concurrent_sweeping_;
-  i::FLAG_stress_concurrent_allocation = flag_stress_concurrent_allocation_;
-  i::FLAG_stress_incremental_marking = flag_stress_incremental_marking_;
-  i::FLAG_parallel_marking = flag_parallel_marking_;
-  i::FLAG_detect_ineffective_gcs_near_heap_limit =
+  i::v8_flags.concurrent_marking = flag_concurrent_marking_;
+  i::v8_flags.concurrent_sweeping = flag_concurrent_sweeping_;
+  i::v8_flags.concurrent_minor_mc_marking = flag_concurrent_minor_mc_marking_;
+  i::v8_flags.stress_concurrent_allocation = flag_stress_concurrent_allocation_;
+  i::v8_flags.stress_incremental_marking = flag_stress_incremental_marking_;
+  i::v8_flags.parallel_marking = flag_parallel_marking_;
+  i::v8_flags.detect_ineffective_gcs_near_heap_limit =
       flag_detect_ineffective_gcs_near_heap_limit_;
 }
 

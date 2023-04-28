@@ -28,7 +28,6 @@ Local<Function> WasmStreamingObject::Initialize(Environment* env) {
 
   Isolate* isolate = env->isolate();
   Local<FunctionTemplate> t = NewFunctionTemplate(isolate, New);
-  t->Inherit(BaseObject::GetConstructorTemplate(env));
   t->InstanceTemplate()->SetInternalFieldCount(
       WasmStreamingObject::kInternalFieldCount);
 
@@ -208,6 +207,7 @@ void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
 }  // namespace wasm_web_api
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(wasm_web_api, node::wasm_web_api::Initialize)
-NODE_MODULE_EXTERNAL_REFERENCE(wasm_web_api,
-                               node::wasm_web_api::RegisterExternalReferences)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(wasm_web_api,
+                                    node::wasm_web_api::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(wasm_web_api,
+                                node::wasm_web_api::RegisterExternalReferences)

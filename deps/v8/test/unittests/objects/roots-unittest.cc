@@ -59,6 +59,7 @@ bool IsInitiallyMutable(Factory* factory, Address object_address) {
   V(retaining_path_targets)               \
   V(serialized_global_proxy_sizes)        \
   V(serialized_objects)                   \
+  IF_WASM(V, js_to_wasm_wrappers)         \
   IF_WASM(V, wasm_canonical_rtts)         \
   V(weak_refs_keep_during_job)
 
@@ -90,6 +91,17 @@ TEST_F(RootsTest, TestHeapRootsNotReadOnly) {
   Heap* heap = i_isolate()->heap();
 
   MUTABLE_ROOT_LIST(CHECK_NOT_IN_RO_SPACE)
+}
+
+TEST_F(RootsTest, TestHeapNumberList) {
+  ReadOnlyRoots roots(isolate());
+  for (auto pos = RootIndex::kFirstReadOnlyRoot;
+       pos <= RootIndex::kLastReadOnlyRoot; ++pos) {
+    auto obj = roots.object_at(pos);
+    bool in_nr_range = pos >= RootIndex::kFirstHeapNumberRoot &&
+                       pos <= RootIndex::kLastHeapNumberRoot;
+    CHECK_EQ(obj.IsHeapNumber(), in_nr_range);
+  }
 }
 
 #undef CHECK_NOT_IN_RO_SPACE

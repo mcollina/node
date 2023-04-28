@@ -20,21 +20,27 @@ jobs:
 
     steps:
       - name: Checkout nodejs/node
-        uses: actions/checkout@v3
+        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c  # v3.3.0
         with:
           persist-credentials: false
 
       - name: Checkout unicode-org/icu-data
-        uses: actions/checkout@v3
+        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c  # v3.3.0
         with:
           path: icu-data
           persist-credentials: false
           repository: unicode-org/icu-data
 
+      - name: Record new version
+        run: echo "new_version=$(ls icu-data/tzdata/icunew | tail -1)" >> $GITHUB_ENV
+
       - run: ./tools/update-timezone.mjs
 
+      - name: Update the expected timezone version in test
+        run: echo "${{ env.new_version }}" > test/fixtures/tz-version.txt
+
       - name: Open Pull Request
-        uses: gr2m/create-or-update-pull-request-action@6720400cad8e74d7adc64640e4e6ea6748b83d8f  # Create a PR or update the Action's existing PR
+        uses: gr2m/create-or-update-pull-request-action@77596e3166f328b24613f7082ab30bf2d93079d5  # Create a PR or update the Action's existing PR
         env:
           GITHUB_TOKEN: ${{ secrets.GH_USER_TOKEN }}
         with:
@@ -49,7 +55,8 @@ jobs:
             console.log(process.versions.tz)
             ```
           branch: actions/timezone-update
-          commit-message: 'deps: update timezone'
+          commit-message: 'deps: update timezone to ${{ env.new_version }}'
           labels: dependencies
-          title: 'deps: update timezone'
+          title: 'deps: update timezone to ${{ env.new_version }}'
           reviewers: \@nodejs/i18n-api
+          update-pull-request-title-and-body: true

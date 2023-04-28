@@ -12,7 +12,8 @@ namespace internal {
 namespace compiler {
 
 static void IsOptimized(const v8::FunctionCallbackInfo<v8::Value>& args) {
-  JavaScriptFrameIterator it(reinterpret_cast<Isolate*>(args.GetIsolate()));
+  JavaScriptStackFrameIterator it(
+      reinterpret_cast<Isolate*>(args.GetIsolate()));
   JavaScriptFrame* frame = it.frame();
   return args.GetReturnValue().Set(frame->is_turbofan());
 }
@@ -31,7 +32,7 @@ class RunDeoptTest : public TestWithContext {
 };
 
 TEST_F(RunDeoptTest, DeoptSimple) {
-  FLAG_allow_natives_syntax = true;
+  v8_flags.allow_natives_syntax = true;
 
   FunctionTester T(i_isolate(),
                    "(function f(a) {"
@@ -47,7 +48,7 @@ TEST_F(RunDeoptTest, DeoptSimple) {
 }
 
 TEST_F(RunDeoptTest, DeoptSimpleInExpr) {
-  FLAG_allow_natives_syntax = true;
+  v8_flags.allow_natives_syntax = true;
 
   FunctionTester T(i_isolate(),
                    "(function f(a) {"
@@ -64,7 +65,7 @@ TEST_F(RunDeoptTest, DeoptSimpleInExpr) {
 }
 
 TEST_F(RunDeoptTest, DeoptExceptionHandlerCatch) {
-  FLAG_allow_natives_syntax = true;
+  v8_flags.allow_natives_syntax = true;
 
   FunctionTester T(i_isolate(),
                    "(function f() {"
@@ -82,7 +83,7 @@ TEST_F(RunDeoptTest, DeoptExceptionHandlerCatch) {
 }
 
 TEST_F(RunDeoptTest, DeoptExceptionHandlerFinally) {
-  FLAG_allow_natives_syntax = true;
+  v8_flags.allow_natives_syntax = true;
 
   FunctionTester T(i_isolate(),
                    "(function f() {"
@@ -100,7 +101,7 @@ TEST_F(RunDeoptTest, DeoptExceptionHandlerFinally) {
 }
 
 TEST_F(RunDeoptTest, DeoptTrivial) {
-  FLAG_allow_natives_syntax = true;
+  v8_flags.allow_natives_syntax = true;
 
   FunctionTester T(i_isolate(),
                    "(function foo() {"

@@ -503,6 +503,8 @@ namespace {
 // Returns true, iff we can use ElementsAccessor for shifting.
 V8_WARN_UNUSED_RESULT bool CanUseFastArrayShift(Isolate* isolate,
                                                 Handle<JSReceiver> receiver) {
+  if (V8_COMPRESS_POINTERS_8GB_BOOL) return false;
+
   if (!EnsureJSArrayWithWritableFastElements(isolate, receiver, nullptr, 0,
                                              0) ||
       !IsJSArrayFastElementMovingAllowed(isolate, JSArray::cast(*receiver))) {
@@ -1102,7 +1104,7 @@ bool IterateElements(Isolate* isolate, Handle<JSReceiver> receiver,
       !HasOnlySimpleElements(isolate, *receiver)) {
     return IterateElementsSlow(isolate, receiver, length, visitor);
   }
-  Handle<JSObject> array = Handle<JSObject>::cast(receiver);
+  Handle<JSArray> array = Handle<JSArray>::cast(receiver);
 
   switch (array->GetElementsKind()) {
     case PACKED_SMI_ELEMENTS:
@@ -1226,17 +1228,14 @@ bool IterateElements(Isolate* isolate, Handle<JSReceiver> receiver,
       UNIMPLEMENTED();
     case NO_ELEMENTS:
       break;
+      // JSArrays cannot have the following elements kinds:
 #define TYPED_ARRAY_CASE(Type, type, TYPE, ctype) case TYPE##_ELEMENTS:
       TYPED_ARRAYS(TYPED_ARRAY_CASE)
-      return IterateElementsSlow(isolate, receiver, length, visitor);
       RAB_GSAB_TYPED_ARRAYS(TYPED_ARRAY_CASE)
-      // TODO(v8:11111): Support RAB / GSAB.
-      UNREACHABLE();
 #undef TYPED_ARRAY_CASE
     case FAST_STRING_WRAPPER_ELEMENTS:
     case SLOW_STRING_WRAPPER_ELEMENTS:
     case SHARED_ARRAY_ELEMENTS:
-      // |array| is guaranteed to be an array or typed array.
       UNREACHABLE();
   }
   visitor->increase_index_offset(length);
@@ -1393,7 +1392,18 @@ Object Slow_ArrayConcat(BuiltinArguments* args, Handle<Object> species,
               UNREACHABLE();
           }
         }
-        if (failure) break;
+        if (failure) {
+#ifdef VERIFY_HEAP
+          // The allocated storage may contain uninitialized values which will
+          // cause FixedDoubleArray::FixedDoubleArrayVerify to fail, when the
+          // heap is verified (see: crbug.com/1415071). To prevent this, we
+          // initialize the array with holes.
+          if (v8_flags.verify_heap) {
+            double_storage->FillWithHoles(0, estimate_result_length);
+          }
+#endif  // VERIFY_HEAP
+          break;
+        }
       }
     }
     if (!failure) {
@@ -1599,7 +1609,8 @@ enum class ArrayGroupMode { kToObject, kToMap };
 template <ArrayGroupMode mode>
 inline MaybeHandle<OrderedHashMap> GenericArrayGroup(
     Isolate* isolate, Handle<JSReceiver> O, Handle<Object> callbackfn,
-    Handle<OrderedHashMap> groups, double initialK, double len) {
+    Handle<Object> thisArg, Handle<OrderedHashMap> groups, double initialK,
+    double len) {
   // 6. Repeat, while k < len
   for (double k = initialK; k < len; ++k) {
     // 6a. Let Pk be ! ToString(𝔽(k)).
@@ -1617,9 +1628,9 @@ inline MaybeHandle<OrderedHashMap> GenericArrayGroup(
     // 6c. Let key be ? Call(callbackfn, thisArg, « kValue, 𝔽(k), O »).
     Handle<Object> propertyKey;
     Handle<Object> argv[] = {kValue, isolate->factory()->NewNumber(k), O};
-    ASSIGN_RETURN_ON_EXCEPTION(isolate, propertyKey,
-                               Execution::Call(isolate, callbackfn, O, 3, argv),
-                               OrderedHashMap);
+    ASSIGN_RETURN_ON_EXCEPTION(
+        isolate, propertyKey,
+        Execution::Call(isolate, callbackfn, thisArg, 3, argv), OrderedHashMap);
 
     if (mode == ArrayGroupMode::kToMap) {
       // 6d. If key is -0𝔽, set key to +0𝔽.
@@ -1649,7 +1660,7 @@ inline MaybeHandle<OrderedHashMap> GenericArrayGroup(
 template <ArrayGroupMode mode>
 inline MaybeHandle<OrderedHashMap> FastArrayGroup(
     Isolate* isolate, Handle<JSArray> array, Handle<Object> callbackfn,
-    Handle<OrderedHashMap> groups, double len,
+    Handle<Object> thisArg, Handle<OrderedHashMap> groups, double len,
     ElementsKind* result_elements_kind) {
   DCHECK_NOT_NULL(result_elements_kind);
 
@@ -1662,8 +1673,8 @@ inline MaybeHandle<OrderedHashMap> FastArrayGroup(
   for (InternalIndex k : InternalIndex::Range(uint_len)) {
     if (!CheckArrayMapNotModified(array, original_map) ||
         k.as_uint32() >= static_cast<uint32_t>(array->length().Number())) {
-      return GenericArrayGroup<mode>(isolate, array, callbackfn, groups,
-                                     k.as_uint32(), len);
+      return GenericArrayGroup<mode>(isolate, array, callbackfn, thisArg,
+                                     groups, k.as_uint32(), len);
     }
     // 6a. Let Pk be ! ToString(𝔽(k)).
     // 6b. Let kValue be ? Get(O, Pk).
@@ -1679,7 +1690,7 @@ inline MaybeHandle<OrderedHashMap> FastArrayGroup(
         kValue, isolate->factory()->NewNumber(k.as_uint32()), array};
     ASSIGN_RETURN_ON_EXCEPTION(
         isolate, propertyKey,
-        Execution::Call(isolate, callbackfn, array, 3, argv), OrderedHashMap);
+        Execution::Call(isolate, callbackfn, thisArg, 3, argv), OrderedHashMap);
 
     if (mode == ArrayGroupMode::kToMap) {
       // 6d. If key is -0𝔽, set key to +0𝔽.
@@ -1719,7 +1730,7 @@ inline MaybeHandle<OrderedHashMap> FastArrayGroup(
 
 }  // namespace
 
-// https://tc39.es/proposal-array-grouping/#sec-array.prototype.groupby
+// https://tc39.es/proposal-array-grouping/#sec-array.prototype.group
 BUILTIN(ArrayPrototypeGroup) {
   const char* const kMethodName = "Array.prototype.group";
   HandleScope scope(isolate);
@@ -1741,6 +1752,8 @@ BUILTIN(ArrayPrototypeGroup) {
         isolate, NewTypeError(MessageTemplate::kCalledNonCallable, callbackfn));
   }
 
+  Handle<Object> thisArg = args.atOrUndefined(isolate, 2);
+
   // 5. Let groups be a new empty List.
   Handle<OrderedHashMap> groups = isolate->factory()->NewOrderedHashMap();
   ElementsKind result_elements_kind = ElementsKind::PACKED_ELEMENTS;
@@ -1748,14 +1761,15 @@ BUILTIN(ArrayPrototypeGroup) {
     Handle<JSArray> array = Handle<JSArray>::cast(O);
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
         isolate, groups,
-        FastArrayGroup<ArrayGroupMode::kToObject>(
-            isolate, array, callbackfn, groups, len, &result_elements_kind));
+        FastArrayGroup<ArrayGroupMode::kToObject>(isolate, array, callbackfn,
+                                                  thisArg, groups, len,
+                                                  &result_elements_kind));
   } else {
     // 4. Let k be 0.
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
         isolate, groups,
         GenericArrayGroup<ArrayGroupMode::kToObject>(isolate, O, callbackfn,
-                                                     groups, 0, len));
+                                                     thisArg, groups, 0, len));
   }
 
   // 7. Let obj be ! OrdinaryObjectCreate(null).
@@ -1781,7 +1795,7 @@ BUILTIN(ArrayPrototypeGroup) {
   return *obj;
 }
 
-// https://tc39.es/proposal-array-grouping/#sec-array.prototype.groupbymap
+// https://tc39.es/proposal-array-grouping/#sec-array.prototype.grouptomap
 BUILTIN(ArrayPrototypeGroupToMap) {
   const char* const kMethodName = "Array.prototype.groupToMap";
   HandleScope scope(isolate);
@@ -1803,21 +1817,23 @@ BUILTIN(ArrayPrototypeGroupToMap) {
         isolate, NewTypeError(MessageTemplate::kCalledNonCallable, callbackfn));
   }
 
+  Handle<Object> thisArg = args.atOrUndefined(isolate, 2);
+
   // 5. Let groups be a new empty List.
   Handle<OrderedHashMap> groups = isolate->factory()->NewOrderedHashMap();
   ElementsKind result_elements_kind = ElementsKind::PACKED_ELEMENTS;
   if (IsFastArray(O)) {
     Handle<JSArray> array = Handle<JSArray>::cast(O);
-    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
-        isolate, groups,
-        FastArrayGroup<ArrayGroupMode::kToMap>(
-            isolate, array, callbackfn, groups, len, &result_elements_kind));
+    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, groups,
+                                       FastArrayGroup<ArrayGroupMode::kToMap>(
+                                           isolate, array, callbackfn, thisArg,
+                                           groups, len, &result_elements_kind));
   } else {
     // 4. Let k be 0.
     ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
         isolate, groups,
         GenericArrayGroup<ArrayGroupMode::kToMap>(isolate, O, callbackfn,
-                                                  groups, 0, len));
+                                                  thisArg, groups, 0, len));
   }
 
   // 7. Let map be ! Construct(%Map%).
@@ -1842,6 +1858,13 @@ BUILTIN(ArrayPrototypeGroupToMap) {
 
   // 9. Return map.
   return *map;
+}
+
+BUILTIN(ArrayFromAsync) {
+  HandleScope scope(isolate);
+  DCHECK(v8_flags.harmony_array_from_async);
+
+  return ReadOnlyRoots(isolate).undefined_value();
 }
 
 }  // namespace internal

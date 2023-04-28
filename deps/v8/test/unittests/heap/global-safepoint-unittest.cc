@@ -22,7 +22,7 @@ namespace {
 
 class IsolateWithContextWrapper {
  public:
-  explicit IsolateWithContextWrapper()
+  IsolateWithContextWrapper()
       : isolate_wrapper_(kNoCounters),
         isolate_scope_(isolate_wrapper_.isolate()),
         handle_scope_(isolate_wrapper_.isolate()),
@@ -72,7 +72,6 @@ class InfiniteLooperThread final : public ParkingThread {
     v8::Local<v8::String> source =
         v8::String::NewFromUtf8(v8_isolate, "for(;;) {}").ToLocalChecked();
     auto context = v8_isolate->GetCurrentContext();
-    v8::Local<v8::Value> result;
     v8::Local<v8::Script> script =
         v8::Script::Compile(context, source).ToLocalChecked();
 
@@ -125,8 +124,9 @@ TEST_F(GlobalSafepointTest, Interrupt) {
     // as of FeedbackVectors, and we wouldn't be testing the interrupt check.
     base::OS::Sleep(base::TimeDelta::FromMilliseconds(500));
     GlobalSafepointScope global_safepoint(i_main_isolate);
-    i_main_isolate->shared_isolate()->global_safepoint()->IterateClientIsolates(
-        [](Isolate* client) {
+    i_main_isolate->shared_space_isolate()
+        ->global_safepoint()
+        ->IterateSharedSpaceAndClientIsolates([](Isolate* client) {
           client->stack_guard()->RequestTerminateExecution();
         });
   }

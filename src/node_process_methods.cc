@@ -207,6 +207,13 @@ static void MemoryUsage(const FunctionCallbackInfo<Value>& args) {
           : static_cast<double>(array_buffer_allocator->total_mem_usage());
 }
 
+static void GetConstrainedMemory(const FunctionCallbackInfo<Value>& args) {
+  uint64_t value = uv_get_constrained_memory();
+  if (value != 0) {
+    args.GetReturnValue().Set(static_cast<double>(value));
+  }
+}
+
 void RawDebug(const FunctionCallbackInfo<Value>& args) {
   CHECK(args.Length() == 1 && args[0]->IsString() &&
         "must be called with a single string");
@@ -259,21 +266,6 @@ static void GetActiveRequests(const FunctionCallbackInfo<Value>& args) {
       Array::New(env->isolate(), request_v.data(), request_v.size()));
 }
 
-static void GetActiveRequestsInfo(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
-
-  std::vector<Local<Value>> requests_info;
-  for (ReqWrapBase* req_wrap : *env->req_wrap_queue()) {
-    AsyncWrap* w = req_wrap->GetAsyncWrap();
-    if (w->persistent().IsEmpty()) continue;
-    requests_info.emplace_back(OneByteString(env->isolate(),
-                               w->MemoryInfoName().c_str()));
-  }
-
-  args.GetReturnValue().Set(
-      Array::New(env->isolate(), requests_info.data(), requests_info.size()));
-}
-
 // Non-static, friend of HandleWrap. Could have been a HandleWrap method but
 // implemented here for consistency with GetActiveRequests().
 void GetActiveHandles(const FunctionCallbackInfo<Value>& args) {
@@ -289,18 +281,37 @@ void GetActiveHandles(const FunctionCallbackInfo<Value>& args) {
       Array::New(env->isolate(), handle_v.data(), handle_v.size()));
 }
 
-void GetActiveHandlesInfo(const FunctionCallbackInfo<Value>& args) {
+static void GetActiveResourcesInfo(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
+  std::vector<Local<Value>> resources_info;
 
-  std::vector<Local<Value>> handles_info;
-  for (HandleWrap* w : *env->handle_wrap_queue()) {
-    if (w->persistent().IsEmpty() || !HandleWrap::HasRef(w)) continue;
-    handles_info.emplace_back(OneByteString(env->isolate(),
-                              w->MemoryInfoName().c_str()));
+  // Active requests
+  for (ReqWrapBase* req_wrap : *env->req_wrap_queue()) {
+    AsyncWrap* w = req_wrap->GetAsyncWrap();
+    if (w->persistent().IsEmpty()) continue;
+    resources_info.emplace_back(
+        OneByteString(env->isolate(), w->MemoryInfoName()));
   }
 
+  // Active handles
+  for (HandleWrap* w : *env->handle_wrap_queue()) {
+    if (w->persistent().IsEmpty() || !HandleWrap::HasRef(w)) continue;
+    resources_info.emplace_back(
+        OneByteString(env->isolate(), w->MemoryInfoName()));
+  }
+
+  // Active timeouts
+  resources_info.insert(resources_info.end(),
+                        env->timeout_info()[0],
+                        OneByteString(env->isolate(), "Timeout"));
+
+  // Active immediates
+  resources_info.insert(resources_info.end(),
+                        env->immediate_info()->ref_count(),
+                        OneByteString(env->isolate(), "Immediate"));
+
   args.GetReturnValue().Set(
-      Array::New(env->isolate(), handles_info.data(), handles_info.size()));
+      Array::New(env->isolate(), resources_info.data(), resources_info.size()));
 }
 
 static void ResourceUsage(const FunctionCallbackInfo<Value>& args) {
@@ -453,14 +464,13 @@ static void ReallyExit(const FunctionCallbackInfo<Value>& args) {
 
 namespace process {
 
-BindingData::BindingData(Environment* env, v8::Local<v8::Object> object)
-    : SnapshotableObject(env, object, type_int) {
-  Local<ArrayBuffer> ab = ArrayBuffer::New(env->isolate(), kBufferSize);
-  array_buffer_.Reset(env->isolate(), ab);
-  object
-      ->Set(env->context(),
-            FIXED_ONE_BYTE_STRING(env->isolate(), "hrtimeBuffer"),
-            ab)
+BindingData::BindingData(Realm* realm, v8::Local<v8::Object> object)
+    : SnapshotableObject(realm, object, type_int) {
+  Isolate* isolate = realm->isolate();
+  Local<Context> context = realm->context();
+  Local<ArrayBuffer> ab = ArrayBuffer::New(isolate, kBufferSize);
+  array_buffer_.Reset(isolate, ab);
+  object->Set(context, FIXED_ONE_BYTE_STRING(isolate, "hrtimeBuffer"), ab)
       .ToChecked();
   backing_store_ = ab->GetBackingStore();
 }
@@ -470,8 +480,9 @@ v8::CFunction BindingData::fast_bigint_(v8::CFunction::Make(FastBigInt));
 
 void BindingData::AddMethods() {
   Local<Context> ctx = env()->context();
-  SetFastMethod(ctx, object(), "hrtime", SlowNumber, &fast_number_);
-  SetFastMethod(ctx, object(), "hrtimeBigInt", SlowBigInt, &fast_bigint_);
+  SetFastMethodNoSideEffect(ctx, object(), "hrtime", SlowNumber, &fast_number_);
+  SetFastMethodNoSideEffect(
+      ctx, object(), "hrtimeBigInt", SlowBigInt, &fast_bigint_);
 }
 
 void BindingData::RegisterExternalReferences(
@@ -552,9 +563,9 @@ void BindingData::Deserialize(Local<Context> context,
                               InternalFieldInfoBase* info) {
   DCHECK_EQ(index, BaseObject::kEmbedderType);
   v8::HandleScope scope(context->GetIsolate());
-  Environment* env = Environment::GetCurrent(context);
+  Realm* realm = Realm::GetCurrent(context);
   // Recreate the buffer in the constructor.
-  BindingData* binding = env->AddBindingData<BindingData>(context, holder);
+  BindingData* binding = realm->AddBindingData<BindingData>(context, holder);
   CHECK_NOT_NULL(binding);
 }
 
@@ -562,9 +573,10 @@ static void Initialize(Local<Object> target,
                        Local<Value> unused,
                        Local<Context> context,
                        void* priv) {
-  Environment* env = Environment::GetCurrent(context);
+  Realm* realm = Realm::GetCurrent(context);
+  Environment* env = realm->env();
   BindingData* const binding_data =
-      env->AddBindingData<BindingData>(context, target);
+      realm->AddBindingData<BindingData>(context, target);
   if (binding_data == nullptr) return;
   binding_data->AddMethods();
 
@@ -578,15 +590,15 @@ static void Initialize(Local<Object> target,
 
   SetMethod(context, target, "umask", Umask);
   SetMethod(context, target, "memoryUsage", MemoryUsage);
+  SetMethod(context, target, "constrainedMemory", GetConstrainedMemory);
   SetMethod(context, target, "rss", Rss);
   SetMethod(context, target, "cpuUsage", CPUUsage);
   SetMethod(context, target, "resourceUsage", ResourceUsage);
 
   SetMethod(context, target, "_debugEnd", DebugEnd);
-  SetMethod(context, target, "_getActiveRequestsInfo", GetActiveRequestsInfo);
   SetMethod(context, target, "_getActiveRequests", GetActiveRequests);
   SetMethod(context, target, "_getActiveHandles", GetActiveHandles);
-  SetMethod(context, target, "_getActiveHandlesInfo", GetActiveHandlesInfo);
+  SetMethod(context, target, "getActiveResourcesInfo", GetActiveResourcesInfo);
   SetMethod(context, target, "_kill", Kill);
   SetMethod(context, target, "_rawDebug", RawDebug);
 
@@ -609,14 +621,14 @@ void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
   registry->Register(Umask);
   registry->Register(RawDebug);
   registry->Register(MemoryUsage);
+  registry->Register(GetConstrainedMemory);
   registry->Register(Rss);
   registry->Register(CPUUsage);
   registry->Register(ResourceUsage);
 
   registry->Register(GetActiveRequests);
-  registry->Register(GetActiveRequestsInfo);
   registry->Register(GetActiveHandles);
-  registry->Register(GetActiveHandlesInfo);
+  registry->Register(GetActiveResourcesInfo);
   registry->Register(Kill);
 
   registry->Register(Cwd);
@@ -629,6 +641,6 @@ void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
 }  // namespace process
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(process_methods, node::process::Initialize)
-NODE_MODULE_EXTERNAL_REFERENCE(process_methods,
-                               node::process::RegisterExternalReferences)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(process_methods, node::process::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(process_methods,
+                                node::process::RegisterExternalReferences)

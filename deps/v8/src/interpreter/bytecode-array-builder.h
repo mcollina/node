@@ -158,10 +158,6 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
       Register object, Register name,
       DefineKeyedOwnPropertyInLiteralFlags flags, int feedback_slot);
 
-  // Collect type information for developer tools. The value for which we
-  // record the type is stored in the accumulator.
-  BytecodeArrayBuilder& CollectTypeProfile(int position);
-
   // Set a property named by a property name, trigger the setters and
   // set traps if necessary. The value to be set should be in the
   // accumulator.
@@ -195,8 +191,9 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   // Define an own property keyed by a value in a register, trigger the
   // defineProperty traps if necessary. The value to be defined should be
   // in the accumulator.
-  BytecodeArrayBuilder& DefineKeyedOwnProperty(Register object, Register key,
-                                               int feedback_slot);
+  BytecodeArrayBuilder& DefineKeyedOwnProperty(
+      Register object, Register key, DefineKeyedOwnPropertyFlags flags,
+      int feedback_slot);
 
   // Store an own element in an array literal. The value to be stored should be
   // in the accumulator.
@@ -386,9 +383,8 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   // throws a TypeError exception.
   BytecodeArrayBuilder& GetSuperConstructor(Register out);
 
-  BytecodeArrayBuilder& FindNonDefaultConstructor(Register this_function,
-                                                  Register new_target,
-                                                  RegisterList output);
+  BytecodeArrayBuilder& FindNonDefaultConstructorOrConstruct(
+      Register this_function, Register new_target, RegisterList output);
 
   // Deletes property from an object. This expects that accumulator contains
   // the key to be deleted and the register contains a reference to the object.

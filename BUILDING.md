@@ -29,7 +29,7 @@ file a new issue.
     * [Running Coverage](#running-coverage)
     * [Building the documentation](#building-the-documentation)
     * [Building a debug build](#building-a-debug-build)
-    * [Building an ASAN build](#building-an-asan-build)
+    * [Building an ASan build](#building-an-asan-build)
     * [Speeding up frequent rebuilds when developing](#speeding-up-frequent-rebuilds-when-developing)
     * [Troubleshooting Unix and macOS builds](#troubleshooting-unix-and-macos-builds)
   * [Windows](#windows)
@@ -106,14 +106,14 @@ platforms. This is true regardless of entries in the table below.
 | GNU/Linux        | x64              | kernel >= 3.10, musl >= 1.1.19    | Experimental                                    | e.g. Alpine 3.8                      |
 | GNU/Linux        | x86              | kernel >= 3.10, glibc >= 2.17     | Experimental                                    | Downgraded as of Node.js 10          |
 | GNU/Linux        | arm64            | kernel >= 4.18[^1], glibc >= 2.28 | Tier 1                                          | e.g. Ubuntu 20.04, Debian 10, RHEL 8 |
-| GNU/Linux        | armv7            | kernel >= 4.18[^1], glibc >= 2.28 | Tier 1                                          | e.g. Ubuntu 20.04, Debian 10         |
+| GNU/Linux        | armv7            | kernel >= 4.18[^1], glibc >= 2.28 | Tier 1                                          | e.g. Ubuntu 20.04, Debian 11         |
 | GNU/Linux        | armv6            | kernel >= 4.14, glibc >= 2.24     | Experimental                                    | Downgraded as of Node.js 12          |
 | GNU/Linux        | ppc64le >=power8 | kernel >= 4.18[^1], glibc >= 2.28 | Tier 2                                          | e.g. Ubuntu 20.04, RHEL 8            |
 | GNU/Linux        | s390x            | kernel >= 4.18[^1], glibc >= 2.28 | Tier 2                                          | e.g. RHEL 8                          |
 | Windows          | x64, x86 (WoW64) | >= Windows 10/Server 2016         | Tier 1                                          | [^2],[^3]                            |
 | Windows          | x86 (native)     | >= Windows 10/Server 2016         | Tier 1 (running) / Experimental (compiling)[^4] |                                      |
 | Windows          | x64, x86         | Windows 8.1/Server 2012           | Experimental                                    |                                      |
-| Windows          | arm64            | >= Windows 10                     | Tier 2 (compiling) / Experimental (running)     |                                      |
+| Windows          | arm64            | >= Windows 10                     | Tier 2                                          |                                      |
 | macOS            | x64              | >= 10.15                          | Tier 1                                          | For notes about compilation see [^5] |
 | macOS            | arm64            | >= 11                             | Tier 1                                          |                                      |
 | SmartOS          | x64              | >= 18                             | Tier 2                                          |                                      |
@@ -152,7 +152,7 @@ Depending on the host platform, the selection of toolchains may vary.
 
 | Operating System | Compiler Versions                                              |
 | ---------------- | -------------------------------------------------------------- |
-| Linux            | GCC >= 8.3                                                     |
+| Linux            | GCC >= 10.1                                                    |
 | Windows          | Visual Studio >= 2019 with the Windows 10 SDK on a 64-bit host |
 | macOS            | Xcode >= 11 (Apple LLVM >= 11)                                 |
 
@@ -160,22 +160,27 @@ Depending on the host platform, the selection of toolchains may vary.
 
 Binaries at <https://nodejs.org/download/release/> are produced on:
 
-| Binary package          | Platform and Toolchain                                                                                        |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------- |
-| aix-ppc64               | AIX 7.2 TL04 on PPC64BE with GCC 8                                                                            |
-| darwin-x64              | macOS 10.15, Xcode Command Line Tools 11 with -mmacosx-version-min=10.15                                      |
-| darwin-arm64 (and .pkg) | macOS 11 (arm64), Xcode Command Line Tools 12 with -mmacosx-version-min=10.15                                 |
-| linux-arm64             | RHEL 8 with GCC 8[^6]                                                                                         |
-| linux-armv7l            | Cross-compiled on Ubuntu 18.04 x64 with [custom GCC toolchain](https://github.com/rvagg/rpi-newer-crosstools) |
-| linux-ppc64le           | RHEL 8 with GCC 8[^6]                                                                                         |
-| linux-s390x             | RHEL 8 with GCC 8[^6]                                                                                         |
-| linux-x64               | RHEL 8 with GCC 8[^6]                                                                                         |
-| win-x64 and win-x86     | Windows 2012 R2 (x64) with Visual Studio 2019                                                                 |
+| Binary package          | Platform and Toolchain                                                                                      |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| aix-ppc64               | AIX 7.2 TL04 on PPC64BE with GCC 10                                                                         |
+| darwin-x64              | macOS 11, Xcode 12 with -mmacosx-version-min=10.15                                                          |
+| darwin-arm64 (and .pkg) | macOS 11 (arm64), Xcode 12 with -mmacosx-version-min=10.15                                                  |
+| linux-arm64             | RHEL 8 with GCC 10[^6]                                                                                      |
+| linux-armv7l            | Cross-compiled on RHEL 8 x64 with [custom GCC toolchain](https://github.com/rvagg/rpi-newer-crosstools)[^7] |
+| linux-ppc64le           | RHEL 8 with gcc-toolset-10[^6]                                                                              |
+| linux-s390x             | RHEL 8 with gcc-toolset-10[^6]                                                                              |
+| linux-x64               | RHEL 8 with gcc-toolset-10[^6]                                                                              |
+| win-x64 and win-x86     | Windows 2012 R2 (x64) with Visual Studio 2019                                                               |
 
 [^6]: Binaries produced on these systems are compatible with glibc >= 2.28
     and libstdc++ >= 6.0.25 (`GLIBCXX_3.4.25`). These are available on
     distributions natively supporting GCC 8.1 or higher, such as Debian 10,
     RHEL 8 and Ubuntu 20.04.
+
+[^7]: Binaries produced on these systems are compatible with glibc >= 2.28
+    and libstdc++ >= 6.0.28 (`GLIBCXX_3.4.28`). These are available on
+    distributions natively supporting GCC 9.3 or higher, such as Debian 11,
+    Ubuntu 20.04.
 
 #### OpenSSL asm support
 
@@ -223,9 +228,9 @@ The Node.js project supports Python >= 3 for building and testing.
 
 #### Unix prerequisites
 
-* `gcc` and `g++` >= 8.3 or newer
+* `gcc` and `g++` >= 10.1 or newer
 * GNU Make 3.81 or newer
-* Python 3.6, 3.7, 3.8, 3.9, or 3.10 (see note above)
+* Python >=3.6 <=3.11 (see note above)
   * For test coverage, your Python installation must include pip.
 
 Installation via Linux package manager can be achieved with:
@@ -241,7 +246,7 @@ FreeBSD and OpenBSD users may also need to install `libexecinfo`.
 #### macOS prerequisites
 
 * Xcode Command Line Tools >= 11 for macOS
-* Python 3.6, 3.7, 3.8, 3.9, or 3.10 (see note above)
+* Python >=3.6 <=3.11 (see note above)
   * For test coverage, your Python installation must include pip.
 
 macOS users can install the `Xcode Command Line Tools` by running
@@ -342,11 +347,16 @@ the `--help` option:
 $ tools/test.py --help
 ```
 
+> Note: On Windows you should use `python3` executable.
+> Example: `python3 tools/test.py test/message`
+
 You can usually run tests directly with node:
 
 ```text
-$ ./node ./test/parallel/test-stream2-transform.js
+$ ./node test/parallel/test-stream2-transform.js
 ```
+
+> Info: `./node` points to your local Node.js build.
 
 Remember to recompile with `make -j4` in between test runs if you change code in
 the `lib` or `src` directories.
@@ -497,16 +507,16 @@ $ gdb /opt/node-debug/node core.node.8.1535359906
 $ backtrace
 ```
 
-#### Building an ASAN build
+#### Building an ASan build
 
-[ASAN](https://github.com/google/sanitizers) can help detect various memory
-related bugs. ASAN builds are currently only supported on linux.
+[ASan](https://github.com/google/sanitizers) can help detect various memory
+related bugs. ASan builds are currently only supported on linux.
 If you want to check it on Windows or macOS or you want a consistent toolchain
 on Linux, you can try [Docker](https://www.docker.com/products/docker-desktop)
 (using an image like `gengjiawen/node-build:2020-02-14`).
 
 The `--debug` is not necessary and will slow down build and testing, but it can
-show clear stacktrace if ASAN hits an issue.
+show clear stacktrace if ASan hits an issue.
 
 ```console
 $  ./configure --debug --enable-asan && make -j4
@@ -565,7 +575,7 @@ to run it again before invoking `make -j4`.
 
 ##### Option 1: Manual install
 
-* [Python 3.10](https://www.microsoft.com/en-us/p/python-310/9pjpw5ldxlz5)
+* [Python 3.11](https://apps.microsoft.com/store/detail/python-311/9NRWMJP3717K)
 * The "Desktop development with C++" workload from
   [Visual Studio 2019](https://visualstudio.microsoft.com/vs/older-downloads/#visual-studio-2019-and-other-products) or
   the "C++ build tools" workload from the
@@ -581,10 +591,7 @@ to run it again before invoking `make -j4`.
 
 Optional requirements to build the MSI installer package:
 
-* The [WiX Toolset v3.11](https://wixtoolset.org/releases/) and the
-  [Wix Toolset Visual Studio 2019 Extension](https://marketplace.visualstudio.com/items?itemName=WixToolset.WixToolsetVisualStudio2019Extension)
-* The [WiX Toolset v3.14](https://wixtoolset.org/releases/) if
-  building for Windows 10 on ARM (ARM64)
+* The .NET SDK component from [Visual Studio 2019](https://visualstudio.microsoft.com/vs/older-downloads/#visual-studio-2019-and-other-products)
 
 Optional requirements for compiling for Windows 10 on ARM (ARM64):
 

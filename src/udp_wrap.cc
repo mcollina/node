@@ -233,7 +233,7 @@ int sockaddr_for_family(int address_family,
     case AF_INET6:
       return uv_ip6_addr(address, port, reinterpret_cast<sockaddr_in6*>(addr));
     default:
-      CHECK(0 && "unexpected address family");
+      UNREACHABLE("unexpected address family");
   }
 }
 
@@ -806,4 +806,4 @@ void UDPWrap::GetSendQueueCount(const FunctionCallbackInfo<Value>& args) {
 
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(udp_wrap, node::UDPWrap::Initialize)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(udp_wrap, node::UDPWrap::Initialize)

@@ -47,6 +47,7 @@ class JSCollator;
 class JSCollection;
 class JSDateTimeFormat;
 class JSDisplayNames;
+class JSDurationFormat;
 class JSListFormat;
 class JSLocale;
 class JSNumberFormat;
@@ -244,9 +245,13 @@ class CodeAssemblerParameterizedLabel;
   V(IntPtrAdd, WordT, WordT, WordT)                                     \
   V(IntPtrSub, WordT, WordT, WordT)                                     \
   V(IntPtrMul, WordT, WordT, WordT)                                     \
+  V(IntPtrMulHigh, IntPtrT, IntPtrT, IntPtrT)                           \
+  V(UintPtrMulHigh, UintPtrT, UintPtrT, UintPtrT)                       \
   V(IntPtrDiv, IntPtrT, IntPtrT, IntPtrT)                               \
+  V(IntPtrMod, IntPtrT, IntPtrT, IntPtrT)                               \
   V(IntPtrAddWithOverflow, PAIR_TYPE(IntPtrT, BoolT), IntPtrT, IntPtrT) \
   V(IntPtrSubWithOverflow, PAIR_TYPE(IntPtrT, BoolT), IntPtrT, IntPtrT) \
+  V(IntPtrMulWithOverflow, PAIR_TYPE(IntPtrT, BoolT), IntPtrT, IntPtrT) \
   V(Int32Add, Word32T, Word32T, Word32T)                                \
   V(Int32AddWithOverflow, PAIR_TYPE(Int32T, BoolT), Int32T, Int32T)     \
   V(Int32Sub, Word32T, Word32T, Word32T)                                \
@@ -254,11 +259,15 @@ class CodeAssemblerParameterizedLabel;
   V(Int32Mul, Word32T, Word32T, Word32T)                                \
   V(Int32MulWithOverflow, PAIR_TYPE(Int32T, BoolT), Int32T, Int32T)     \
   V(Int32Div, Int32T, Int32T, Int32T)                                   \
+  V(Uint32Div, Uint32T, Uint32T, Uint32T)                               \
   V(Int32Mod, Int32T, Int32T, Int32T)                                   \
+  V(Uint32Mod, Uint32T, Uint32T, Uint32T)                               \
   V(Int64Add, Word64T, Word64T, Word64T)                                \
   V(Int64Sub, Word64T, Word64T, Word64T)                                \
   V(Int64SubWithOverflow, PAIR_TYPE(Int64T, BoolT), Int64T, Int64T)     \
   V(Int64Mul, Word64T, Word64T, Word64T)                                \
+  V(Int64MulHigh, Int64T, Int64T, Int64T)                               \
+  V(Uint64MulHigh, Uint64T, Uint64T, Uint64T)                           \
   V(Int64Div, Int64T, Int64T, Int64T)                                   \
   V(Int64Mod, Int64T, Int64T, Int64T)                                   \
   V(WordOr, WordT, WordT, WordT)                                        \
@@ -435,7 +444,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
               !std::is_convertible<TNode<PreviousType>, TNode<A>>::value,
           "Unnecessary CAST: types are convertible.");
 #ifdef DEBUG
-      if (FLAG_debug_code) {
+      if (v8_flags.debug_code) {
         TNode<ExternalReference> function = code_assembler_->ExternalConstant(
             ExternalReference::check_object_type());
         code_assembler_->CallCFunction(
@@ -501,6 +510,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
 #endif
 
   // Constants.
+  TNode<Int32T> UniqueInt32Constant(int32_t value);
   TNode<Int32T> Int32Constant(int32_t value);
   TNode<Int64T> Int64Constant(int64_t value);
   TNode<Uint64T> Uint64Constant(uint64_t value) {
@@ -546,6 +556,9 @@ class V8_EXPORT_PRIVATE CodeAssembler {
   TNode<BoolT> BoolConstant(bool value) {
     return value ? Int32TrueConstant() : Int32FalseConstant();
   }
+  TNode<ExternalPointerHandleT> ExternalPointerHandleNullConstant() {
+    return ReinterpretCast<ExternalPointerHandleT>(Uint32Constant(0));
+  }
 
   bool IsMapOffsetConstant(Node* node);
 
@@ -572,7 +585,8 @@ class V8_EXPORT_PRIVATE CodeAssembler {
     return UncheckedCast<UintPtrT>(x);
   }
 
-  static constexpr int kTargetParameterIndex = -1;
+  static constexpr int kTargetParameterIndex = kJSCallClosureParameterIndex;
+  static_assert(kTargetParameterIndex == -1);
 
   template <class T>
   TNode<T> Parameter(
@@ -618,13 +632,13 @@ class V8_EXPORT_PRIVATE CodeAssembler {
   void DebugBreak();
   void Unreachable();
   void Comment(const char* msg) {
-    if (!FLAG_code_comments) return;
+    if (!v8_flags.code_comments) return;
     Comment(std::string(msg));
   }
   void Comment(std::string msg);
   template <class... Args>
   void Comment(Args&&... args) {
-    if (!FLAG_code_comments) return;
+    if (!v8_flags.code_comments) return;
     std::ostringstream s;
     USE((s << std::forward<Args>(args))...);
     Comment(s.str());
@@ -969,6 +983,9 @@ class V8_EXPORT_PRIVATE CodeAssembler {
   TNode<IntPtrT> WordNot(TNode<IntPtrT> a) {
     return Signed(WordNot(static_cast<TNode<WordT>>(a)));
   }
+  TNode<Int32T> Word32BitwiseNot(TNode<Int32T> a) {
+    return Signed(Word32BitwiseNot(static_cast<TNode<Word32T>>(a)));
+  }
   TNode<BoolT> Word32Or(TNode<BoolT> left, TNode<BoolT> right) {
     return UncheckedCast<BoolT>(Word32Or(static_cast<TNode<Word32T>>(left),
                                          static_cast<TNode<Word32T>>(right)));
@@ -1001,6 +1018,11 @@ class V8_EXPORT_PRIVATE CodeAssembler {
   TNode<Int32T> Int32Mul(TNode<Int32T> left, TNode<Int32T> right) {
     return Signed(Int32Mul(static_cast<TNode<Word32T>>(left),
                            static_cast<TNode<Word32T>>(right)));
+  }
+
+  TNode<Uint32T> Uint32Mul(TNode<Uint32T> left, TNode<Uint32T> right) {
+    return Unsigned(Int32Mul(static_cast<TNode<Word32T>>(left),
+                             static_cast<TNode<Word32T>>(right)));
   }
 
   TNode<Int64T> Int64Add(TNode<Int64T> left, TNode<Int64T> right) {
@@ -1158,13 +1180,13 @@ class V8_EXPORT_PRIVATE CodeAssembler {
   template <class T = Object, class... TArgs>
   TNode<T> CallStub(Callable const& callable, TNode<Object> context,
                     TArgs... args) {
-    TNode<CodeT> target = HeapConstant(callable.code());
+    TNode<Code> target = HeapConstant(callable.code());
     return CallStub<T>(callable.descriptor(), target, context, args...);
   }
 
   template <class T = Object, class... TArgs>
   TNode<T> CallStub(const CallInterfaceDescriptor& descriptor,
-                    TNode<CodeT> target, TNode<Object> context, TArgs... args) {
+                    TNode<Code> target, TNode<Object> context, TArgs... args) {
     return UncheckedCast<T>(CallStubR(StubCallMode::kCallCodeObject, descriptor,
                                       target, context, args...));
   }
@@ -1180,13 +1202,13 @@ class V8_EXPORT_PRIVATE CodeAssembler {
   template <class... TArgs>
   void TailCallStub(Callable const& callable, TNode<Object> context,
                     TArgs... args) {
-    TNode<CodeT> target = HeapConstant(callable.code());
+    TNode<Code> target = HeapConstant(callable.code());
     TailCallStub(callable.descriptor(), target, context, args...);
   }
 
   template <class... TArgs>
   void TailCallStub(const CallInterfaceDescriptor& descriptor,
-                    TNode<CodeT> target, TNode<Object> context, TArgs... args) {
+                    TNode<Code> target, TNode<Object> context, TArgs... args) {
     TailCallStubImpl(descriptor, target, context, {args...});
   }
 
@@ -1209,7 +1231,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
   // Note that no arguments adaption is going on here - all the JavaScript
   // arguments are left on the stack unmodified. Therefore, this tail call can
   // only be used after arguments adaptation has been performed already.
-  void TailCallJSCode(TNode<CodeT> code, TNode<Context> context,
+  void TailCallJSCode(TNode<Code> code, TNode<Context> context,
                       TNode<JSFunction> function, TNode<Object> new_target,
                       TNode<Int32T> arg_count);
 
@@ -1218,7 +1240,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
                        Node* receiver, TArgs... args) {
     int argc = JSParameterCount(static_cast<int>(sizeof...(args)));
     TNode<Int32T> arity = Int32Constant(argc);
-    TNode<CodeT> target = HeapConstant(callable.code());
+    TNode<Code> target = HeapConstant(callable.code());
     return CAST(CallJSStubImpl(callable.descriptor(), target, CAST(context),
                                CAST(function), {}, arity, {receiver, args...}));
   }
@@ -1229,7 +1251,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
     int argc = JSParameterCount(static_cast<int>(sizeof...(args)));
     TNode<Int32T> arity = Int32Constant(argc);
     TNode<Object> receiver = LoadRoot(RootIndex::kUndefinedValue);
-    TNode<CodeT> target = HeapConstant(callable.code());
+    TNode<Code> target = HeapConstant(callable.code());
     return CallJSStubImpl(callable.descriptor(), target, CAST(context),
                           CAST(function), CAST(new_target), arity,
                           {receiver, args...});
@@ -1328,7 +1350,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
                            std::initializer_list<TNode<Object>> args);
 
   void TailCallStubImpl(const CallInterfaceDescriptor& descriptor,
-                        TNode<CodeT> target, TNode<Object> context,
+                        TNode<Code> target, TNode<Object> context,
                         std::initializer_list<Node*> args);
 
   void TailCallStubThenBytecodeDispatchImpl(

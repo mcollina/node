@@ -23,12 +23,12 @@ console.log(hash);
 ```
 
 ```cjs
-const crypto = require('node:crypto');
+const { createHmac } = require('node:crypto');
 
 const secret = 'abcdefg';
-const hash = crypto.createHmac('sha256', secret)
-                   .update('I love cupcakes')
-                   .digest('hex');
+const hash = createHmac('sha256', secret)
+               .update('I love cupcakes')
+               .digest('hex');
 console.log(hash);
 // Prints:
 //   c0fa1bc00531bd78ef38c628449c5102aeabd49b5dc3a2a516ea6ea959d6658e
@@ -49,7 +49,7 @@ let crypto;
 try {
   crypto = require('node:crypto');
 } catch (err) {
-  console.log('crypto support is disabled!');
+  console.error('crypto support is disabled!');
 }
 ```
 
@@ -67,7 +67,7 @@ let crypto;
 try {
   crypto = await import('node:crypto');
 } catch (err) {
-  console.log('crypto support is disabled!');
+  console.error('crypto support is disabled!');
 }
 ```
 
@@ -178,8 +178,8 @@ console.log(Certificate.verifySpkac(Buffer.from(spkac)));
 ```
 
 ```cjs
-const { Certificate } = require('node:crypto');
 const { Buffer } = require('node:buffer');
+const { Certificate } = require('node:crypto');
 
 const spkac = getSpkacSomehow();
 console.log(Certificate.verifySpkac(Buffer.from(spkac)));
@@ -292,8 +292,8 @@ console.log(cert.verifySpkac(Buffer.from(spkac)));
 ```
 
 ```cjs
-const { Certificate } = require('node:crypto');
 const { Buffer } = require('node:buffer');
+const { Certificate } = require('node:crypto');
 
 const cert = Certificate();
 const spkac = getSpkacSomehow();
@@ -327,7 +327,7 @@ Example: Using `Cipher` objects as streams:
 const {
   scrypt,
   randomFill,
-  createCipheriv
+  createCipheriv,
 } = await import('node:crypto');
 
 const algorithm = 'aes-192-cbc';
@@ -360,7 +360,7 @@ scrypt(password, 'salt', 24, (err, key) => {
 const {
   scrypt,
   randomFill,
-  createCipheriv
+  createCipheriv,
 } = require('node:crypto');
 
 const algorithm = 'aes-192-cbc';
@@ -398,13 +398,13 @@ import {
 } from 'node:fs';
 
 import {
-  pipeline
+  pipeline,
 } from 'node:stream';
 
 const {
   scrypt,
   randomFill,
-  createCipheriv
+  createCipheriv,
 } = await import('node:crypto');
 
 const algorithm = 'aes-192-cbc';
@@ -437,7 +437,7 @@ const {
 } = require('node:fs');
 
 const {
-  pipeline
+  pipeline,
 } = require('node:stream');
 
 const {
@@ -475,7 +475,7 @@ Example: Using the [`cipher.update()`][] and [`cipher.final()`][] methods:
 const {
   scrypt,
   randomFill,
-  createCipheriv
+  createCipheriv,
 } = await import('node:crypto');
 
 const algorithm = 'aes-192-cbc';
@@ -659,7 +659,7 @@ Example: Using `Decipher` objects as streams:
 import { Buffer } from 'node:buffer';
 const {
   scryptSync,
-  createDecipheriv
+  createDecipheriv,
 } = await import('node:crypto');
 
 const algorithm = 'aes-192-cbc';
@@ -739,7 +739,7 @@ import {
 import { Buffer } from 'node:buffer';
 const {
   scryptSync,
-  createDecipheriv
+  createDecipheriv,
 } = await import('node:crypto');
 
 const algorithm = 'aes-192-cbc';
@@ -789,7 +789,7 @@ Example: Using the [`decipher.update()`][] and [`decipher.final()`][] methods:
 import { Buffer } from 'node:buffer';
 const {
   scryptSync,
-  createDecipheriv
+  createDecipheriv,
 } = await import('node:crypto');
 
 const algorithm = 'aes-192-cbc';
@@ -987,7 +987,7 @@ Instances of the `DiffieHellman` class can be created using the
 import assert from 'node:assert';
 
 const {
-  createDiffieHellman
+  createDiffieHellman,
 } = await import('node:crypto');
 
 // Generate Alice's keys...
@@ -1215,7 +1215,7 @@ Instances of the `ECDH` class can be created using the
 import assert from 'node:assert';
 
 const {
-  createECDH
+  createECDH,
 } = await import('node:crypto');
 
 // Generate Alice's keys...
@@ -1291,7 +1291,7 @@ Example (uncompressing a key):
 ```mjs
 const {
   createECDH,
-  ECDH
+  ECDH,
 } = await import('node:crypto');
 
 const ecdh = createECDH('secp256k1');
@@ -1463,7 +1463,7 @@ Example (obtaining a shared secret):
 ```mjs
 const {
   createECDH,
-  createHash
+  createHash,
 } = await import('node:crypto');
 
 const alice = createECDH('secp256k1');
@@ -1473,7 +1473,7 @@ const bob = createECDH('secp256k1');
 // keys. It would be unwise to use such a predictable private key in a real
 // application.
 alice.setPrivateKey(
-  createHash('sha256').update('alice', 'utf8').digest()
+  createHash('sha256').update('alice', 'utf8').digest(),
 );
 
 // Bob uses a newly generated cryptographically strong
@@ -1500,7 +1500,7 @@ const bob = createECDH('secp256k1');
 // keys. It would be unwise to use such a predictable private key in a real
 // application.
 alice.setPrivateKey(
-  createHash('sha256').update('alice', 'utf8').digest()
+  createHash('sha256').update('alice', 'utf8').digest(),
 );
 
 // Bob uses a newly generated cryptographically strong
@@ -1537,7 +1537,7 @@ Example: Using `Hash` objects as streams:
 
 ```mjs
 const {
-  createHash
+  createHash,
 } = await import('node:crypto');
 
 const hash = createHash('sha256');
@@ -1607,7 +1607,7 @@ Example: Using the [`hash.update()`][] and [`hash.digest()`][] methods:
 
 ```mjs
 const {
-  createHash
+  createHash,
 } = await import('node:crypto');
 
 const hash = createHash('sha256');
@@ -1653,7 +1653,7 @@ its [`hash.digest()`][] method has been called.
 ```mjs
 // Calculate a rolling hash.
 const {
-  createHash
+  createHash,
 } = await import('node:crypto');
 
 const hash = createHash('sha256');
@@ -1751,7 +1751,7 @@ Example: Using `Hmac` objects as streams:
 
 ```mjs
 const {
-  createHmac
+  createHmac,
 } = await import('node:crypto');
 
 const hmac = createHmac('sha256', 'a secret');
@@ -1799,7 +1799,7 @@ Example: Using `Hmac` and piped streams:
 import { createReadStream } from 'node:fs';
 import { stdout } from 'node:process';
 const {
-  createHmac
+  createHmac,
 } = await import('node:crypto');
 
 const hmac = createHmac('sha256', 'a secret');
@@ -1827,7 +1827,7 @@ Example: Using the [`hmac.update()`][] and [`hmac.digest()`][] methods:
 
 ```mjs
 const {
-  createHmac
+  createHmac,
 } = await import('node:crypto');
 
 const hmac = createHmac('sha256', 'a secret');
@@ -1930,13 +1930,13 @@ added: v15.0.0
 Example: Converting a `CryptoKey` instance to a `KeyObject`:
 
 ```mjs
-const { webcrypto, KeyObject } = await import('node:crypto');
-const { subtle } = webcrypto;
+const { KeyObject } = await import('node:crypto');
+const { subtle } = globalThis.crypto;
 
 const key = await subtle.generateKey({
   name: 'HMAC',
   hash: 'SHA-256',
-  length: 256
+  length: 256,
 }, true, ['sign', 'verify']);
 
 const keyObject = KeyObject.from(key);
@@ -1945,18 +1945,14 @@ console.log(keyObject.symmetricKeySize);
 ```
 
 ```cjs
-const {
-  webcrypto: {
-    subtle,
-  },
-  KeyObject,
-} = require('node:crypto');
+const { KeyObject } = require('node:crypto');
+const { subtle } = globalThis.crypto;
 
 (async function() {
   const key = await subtle.generateKey({
     name: 'HMAC',
     hash: 'SHA-256',
-    length: 256
+    length: 256,
   }, true, ['sign', 'verify']);
 
   const keyObject = KeyObject.from(key);
@@ -2155,11 +2151,11 @@ Example: Using `Sign` and [`Verify`][] objects as streams:
 const {
   generateKeyPairSync,
   createSign,
-  createVerify
+  createVerify,
 } = await import('node:crypto');
 
 const { privateKey, publicKey } = generateKeyPairSync('ec', {
-  namedCurve: 'sect239k1'
+  namedCurve: 'sect239k1',
 });
 
 const sign = createSign('SHA256');
@@ -2182,7 +2178,7 @@ const {
 } = require('node:crypto');
 
 const { privateKey, publicKey } = generateKeyPairSync('ec', {
-  namedCurve: 'sect239k1'
+  namedCurve: 'sect239k1',
 });
 
 const sign = createSign('SHA256');
@@ -2203,7 +2199,7 @@ Example: Using the [`sign.update()`][] and [`verify.update()`][] methods:
 const {
   generateKeyPairSync,
   createSign,
-  createVerify
+  createVerify,
 } = await import('node:crypto');
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', {
@@ -2882,26 +2878,6 @@ An object containing commonly used constants for crypto and security related
 operations. The specific constants currently defined are described in
 [Crypto constants][].
 
-### `crypto.DEFAULT_ENCODING`
-
-<!-- YAML
-added: v0.9.3
-deprecated: v10.0.0
--->
-
-> Stability: 0 - Deprecated
-
-The default encoding to use for functions that can take either strings
-or [buffers][`Buffer`]. The default value is `'buffer'`, which makes methods
-default to [`Buffer`][] objects.
-
-The `crypto.DEFAULT_ENCODING` mechanism is provided for backward compatibility
-with legacy programs that expect `'latin1'` to be the default encoding.
-
-New applications should expect the default to be `'buffer'`.
-
-This property is deprecated.
-
 ### `crypto.fips`
 
 <!-- YAML
@@ -3335,11 +3311,11 @@ Example: generating the sha256 sum of a file
 
 ```mjs
 import {
-  createReadStream
+  createReadStream,
 } from 'node:fs';
 import { argv } from 'node:process';
 const {
-  createHash
+  createHash,
 } = await import('node:crypto');
 
 const filename = argv[2];
@@ -3421,11 +3397,11 @@ Example: generating the sha256 HMAC of a file
 
 ```mjs
 import {
-  createReadStream
+  createReadStream,
 } from 'node:fs';
 import { argv } from 'node:process';
 const {
-  createHmac
+  createHmac,
 } = await import('node:crypto');
 
 const filename = argv[2];
@@ -3669,7 +3645,7 @@ Asynchronously generates a new random secret key of the given `length`. The
 
 ```mjs
 const {
-  generateKey
+  generateKey,
 } = await import('node:crypto');
 
 generateKey('hmac', { length: 64 }, (err, key) => {
@@ -3739,6 +3715,8 @@ changes:
   * `generator`: {number} Custom generator (DH). **Default:** `2`.
   * `groupName`: {string} Diffie-Hellman group name (DH). See
     [`crypto.getDiffieHellman()`][].
+  * `paramEncoding`: {string} Must be `'named'` or `'explicit'` (EC).
+    **Default:** `'named'`.
   * `publicKeyEncoding`: {Object} See [`keyObject.export()`][].
   * `privateKeyEncoding`: {Object} See [`keyObject.export()`][].
 * `callback`: {Function}
@@ -3758,21 +3736,21 @@ It is recommended to encode public keys as `'spki'` and private keys as
 
 ```mjs
 const {
-  generateKeyPair
+  generateKeyPair,
 } = await import('node:crypto');
 
 generateKeyPair('rsa', {
   modulusLength: 4096,
   publicKeyEncoding: {
     type: 'spki',
-    format: 'pem'
+    format: 'pem',
   },
   privateKeyEncoding: {
     type: 'pkcs8',
     format: 'pem',
     cipher: 'aes-256-cbc',
-    passphrase: 'top secret'
-  }
+    passphrase: 'top secret',
+  },
 }, (err, publicKey, privateKey) => {
   // Handle errors and use the generated key pair.
 });
@@ -3787,14 +3765,14 @@ generateKeyPair('rsa', {
   modulusLength: 4096,
   publicKeyEncoding: {
     type: 'spki',
-    format: 'pem'
+    format: 'pem',
   },
   privateKeyEncoding: {
     type: 'pkcs8',
     format: 'pem',
     cipher: 'aes-256-cbc',
-    passphrase: 'top secret'
-  }
+    passphrase: 'top secret',
+  },
 }, (err, publicKey, privateKey) => {
   // Handle errors and use the generated key pair.
 });
@@ -3851,6 +3829,8 @@ changes:
   * `generator`: {number} Custom generator (DH). **Default:** `2`.
   * `groupName`: {string} Diffie-Hellman group name (DH). See
     [`crypto.getDiffieHellman()`][].
+  * `paramEncoding`: {string} Must be `'named'` or `'explicit'` (EC).
+    **Default:** `'named'`.
   * `publicKeyEncoding`: {Object} See [`keyObject.export()`][].
   * `privateKeyEncoding`: {Object} See [`keyObject.export()`][].
 * Returns: {Object}
@@ -3870,7 +3850,7 @@ and to keep the passphrase confidential.
 
 ```mjs
 const {
-  generateKeyPairSync
+  generateKeyPairSync,
 } = await import('node:crypto');
 
 const {
@@ -3880,14 +3860,14 @@ const {
   modulusLength: 4096,
   publicKeyEncoding: {
     type: 'spki',
-    format: 'pem'
+    format: 'pem',
   },
   privateKeyEncoding: {
     type: 'pkcs8',
     format: 'pem',
     cipher: 'aes-256-cbc',
-    passphrase: 'top secret'
-  }
+    passphrase: 'top secret',
+  },
 });
 ```
 
@@ -3903,14 +3883,14 @@ const {
   modulusLength: 4096,
   publicKeyEncoding: {
     type: 'spki',
-    format: 'pem'
+    format: 'pem',
   },
   privateKeyEncoding: {
     type: 'pkcs8',
     format: 'pem',
     cipher: 'aes-256-cbc',
-    passphrase: 'top secret'
-  }
+    passphrase: 'top secret',
+  },
 });
 ```
 
@@ -3939,7 +3919,7 @@ Synchronously generates a new random secret key of the given `length`. The
 
 ```mjs
 const {
-  generateKeySync
+  generateKeySync,
 } = await import('node:crypto');
 
 const key = generateKeySync('hmac', { length: 64 });
@@ -4086,7 +4066,7 @@ added: v0.9.3
 
 ```mjs
 const {
-  getCiphers
+  getCiphers,
 } = await import('node:crypto');
 
 console.log(getCiphers()); // ['aes-128-cbc', 'aes-128-ccm', ...]
@@ -4110,7 +4090,7 @@ added: v2.3.0
 
 ```mjs
 const {
-  getCurves
+  getCurves,
 } = await import('node:crypto');
 
 console.log(getCurves()); // ['Oakley-EC2N-3', 'Oakley-EC2N-4', ...]
@@ -4147,7 +4127,7 @@ Example (obtaining a shared secret):
 
 ```mjs
 const {
-  getDiffieHellman
+  getDiffieHellman,
 } = await import('node:crypto');
 const alice = getDiffieHellman('modp14');
 const bob = getDiffieHellman('modp14');
@@ -4201,7 +4181,7 @@ added: v0.9.3
 
 ```mjs
 const {
-  getHashes
+  getHashes,
 } = await import('node:crypto');
 
 console.log(getHashes()); // ['DSA', 'DSA-SHA', 'DSA-SHA1', ...]
@@ -4272,7 +4252,7 @@ of the input arguments specify invalid values or types.
 ```mjs
 import { Buffer } from 'node:buffer';
 const {
-  hkdf
+  hkdf,
 } = await import('node:crypto');
 
 hkdf('sha512', 'key', 'salt', 'info', 64, (err, derivedKey) => {
@@ -4330,7 +4310,7 @@ types, or if the derived key cannot be generated.
 ```mjs
 import { Buffer } from 'node:buffer';
 const {
-  hkdfSync
+  hkdfSync,
 } = await import('node:crypto');
 
 const derivedKey = hkdfSync('sha512', 'key', 'salt', 'info', 64);
@@ -4410,7 +4390,7 @@ When passing strings for `password` or `salt`, please consider
 
 ```mjs
 const {
-  pbkdf2
+  pbkdf2,
 } = await import('node:crypto');
 
 pbkdf2('secret', 'salt', 100000, 64, 'sha512', (err, derivedKey) => {
@@ -4427,28 +4407,6 @@ const {
 pbkdf2('secret', 'salt', 100000, 64, 'sha512', (err, derivedKey) => {
   if (err) throw err;
   console.log(derivedKey.toString('hex'));  // '3745e48...08d59ae'
-});
-```
-
-The `crypto.DEFAULT_ENCODING` property can be used to change the way the
-`derivedKey` is passed to the callback. This property, however, has been
-deprecated and use should be avoided.
-
-```mjs
-import crypto from 'node:crypto';
-crypto.DEFAULT_ENCODING = 'hex';
-crypto.pbkdf2('secret', 'salt', 100000, 512, 'sha512', (err, derivedKey) => {
-  if (err) throw err;
-  console.log(derivedKey);  // '3745e48...aa39b34'
-});
-```
-
-```cjs
-const crypto = require('node:crypto');
-crypto.DEFAULT_ENCODING = 'hex';
-crypto.pbkdf2('secret', 'salt', 100000, 512, 'sha512', (err, derivedKey) => {
-  if (err) throw err;
-  console.log(derivedKey);  // '3745e48...aa39b34'
 });
 ```
 
@@ -4505,7 +4463,7 @@ When passing strings for `password` or `salt`, please consider
 
 ```mjs
 const {
-  pbkdf2Sync
+  pbkdf2Sync,
 } = await import('node:crypto');
 
 const key = pbkdf2Sync('secret', 'salt', 100000, 64, 'sha512');
@@ -4519,24 +4477,6 @@ const {
 
 const key = pbkdf2Sync('secret', 'salt', 100000, 64, 'sha512');
 console.log(key.toString('hex'));  // '3745e48...08d59ae'
-```
-
-The `crypto.DEFAULT_ENCODING` property may be used to change the way the
-`derivedKey` is returned. This property, however, is deprecated and use
-should be avoided.
-
-```mjs
-import crypto from 'node:crypto';
-crypto.DEFAULT_ENCODING = 'hex';
-const key = crypto.pbkdf2Sync('secret', 'salt', 100000, 512, 'sha512');
-console.log(key);  // '3745e48...aa39b34'
-```
-
-```cjs
-const crypto = require('node:crypto');
-crypto.DEFAULT_ENCODING = 'hex';
-const key = crypto.pbkdf2Sync('secret', 'salt', 100000, 512, 'sha512');
-console.log(key);  // '3745e48...aa39b34'
 ```
 
 An array of supported digest functions can be retrieved using
@@ -4761,7 +4701,7 @@ If an error occurs, `err` will be an `Error` object; otherwise it is `null`. The
 ```mjs
 // Asynchronous
 const {
-  randomBytes
+  randomBytes,
 } = await import('node:crypto');
 
 randomBytes(256, (err, buf) => {
@@ -4789,7 +4729,7 @@ there is a problem generating the bytes.
 ```mjs
 // Synchronous
 const {
-  randomBytes
+  randomBytes,
 } = await import('node:crypto');
 
 const buf = randomBytes(256);
@@ -5082,7 +5022,7 @@ generated synchronously.
 ```mjs
 // Asynchronous
 const {
-  randomInt
+  randomInt,
 } = await import('node:crypto');
 
 randomInt(3, (err, n) => {
@@ -5106,7 +5046,7 @@ randomInt(3, (err, n) => {
 ```mjs
 // Synchronous
 const {
-  randomInt
+  randomInt,
 } = await import('node:crypto');
 
 const n = randomInt(3);
@@ -5126,7 +5066,7 @@ console.log(`Random number chosen from (0, 1, 2): ${n}`);
 ```mjs
 // With `min` argument
 const {
-  randomInt
+  randomInt,
 } = await import('node:crypto');
 
 const n = randomInt(1, 7);
@@ -5223,7 +5163,7 @@ or types.
 
 ```mjs
 const {
-  scrypt
+  scrypt,
 } = await import('node:crypto');
 
 // Using the factory defaults.
@@ -5304,7 +5244,7 @@ or types.
 
 ```mjs
 const {
-  scryptSync
+  scryptSync,
 } = await import('node:crypto');
 // Using the factory defaults.
 
@@ -5690,7 +5630,7 @@ import { Buffer } from 'node:buffer';
 const {
   createCipheriv,
   createDecipheriv,
-  randomBytes
+  randomBytes,
 } = await import('node:crypto');
 
 const key = 'keykeykeykeykeykeykeykey';
@@ -5699,11 +5639,11 @@ const nonce = randomBytes(12);
 const aad = Buffer.from('0123456789', 'hex');
 
 const cipher = createCipheriv('aes-192-ccm', key, nonce, {
-  authTagLength: 16
+  authTagLength: 16,
 });
 const plaintext = 'Hello world';
 cipher.setAAD(aad, {
-  plaintextLength: Buffer.byteLength(plaintext)
+  plaintextLength: Buffer.byteLength(plaintext),
 });
 const ciphertext = cipher.update(plaintext, 'utf8');
 cipher.final();
@@ -5712,11 +5652,11 @@ const tag = cipher.getAuthTag();
 // Now transmit { ciphertext, nonce, tag }.
 
 const decipher = createDecipheriv('aes-192-ccm', key, nonce, {
-  authTagLength: 16
+  authTagLength: 16,
 });
 decipher.setAuthTag(tag);
 decipher.setAAD(aad, {
-  plaintextLength: ciphertext.length
+  plaintextLength: ciphertext.length,
 });
 const receivedPlaintext = decipher.update(ciphertext, null, 'utf8');
 
@@ -5743,11 +5683,11 @@ const nonce = randomBytes(12);
 const aad = Buffer.from('0123456789', 'hex');
 
 const cipher = createCipheriv('aes-192-ccm', key, nonce, {
-  authTagLength: 16
+  authTagLength: 16,
 });
 const plaintext = 'Hello world';
 cipher.setAAD(aad, {
-  plaintextLength: Buffer.byteLength(plaintext)
+  plaintextLength: Buffer.byteLength(plaintext),
 });
 const ciphertext = cipher.update(plaintext, 'utf8');
 cipher.final();
@@ -5756,11 +5696,11 @@ const tag = cipher.getAuthTag();
 // Now transmit { ciphertext, nonce, tag }.
 
 const decipher = createDecipheriv('aes-192-ccm', key, nonce, {
-  authTagLength: 16
+  authTagLength: 16,
 });
 decipher.setAuthTag(tag);
 decipher.setAAD(aad, {
-  plaintextLength: ciphertext.length
+  plaintextLength: ciphertext.length,
 });
 const receivedPlaintext = decipher.update(ciphertext, null, 'utf8');
 
@@ -5791,7 +5731,7 @@ See the [list of SSL OP Flags][] for details.
   <tr>
     <td><code>SSL_OP_ALL</code></td>
     <td>Applies multiple bug workarounds within OpenSSL. See
-    <a href="https://www.openssl.org/docs/man1.0.2/ssl/SSL_CTX_set_options.html">https://www.openssl.org/docs/man1.0.2/ssl/SSL_CTX_set_options.html</a>
+    <a href="https://www.openssl.org/docs/man3.0/man3/SSL_CTX_set_options.html">https://www.openssl.org/docs/man3.0/man3/SSL_CTX_set_options.html</a>
     for detail.</td>
   </tr>
   <tr>
@@ -5803,13 +5743,13 @@ See the [list of SSL OP Flags][] for details.
     <td><code>SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION</code></td>
     <td>Allows legacy insecure renegotiation between OpenSSL and unpatched
     clients or servers. See
-    <a href="https://www.openssl.org/docs/man1.0.2/ssl/SSL_CTX_set_options.html">https://www.openssl.org/docs/man1.0.2/ssl/SSL_CTX_set_options.html</a>.</td>
+    <a href="https://www.openssl.org/docs/man3.0/man3/SSL_CTX_set_options.html">https://www.openssl.org/docs/man3.0/man3/SSL_CTX_set_options.html</a>.</td>
   </tr>
   <tr>
     <td><code>SSL_OP_CIPHER_SERVER_PREFERENCE</code></td>
     <td>Attempts to use the server's preferences instead of the client's when
     selecting a cipher. Behavior depends on protocol version. See
-    <a href="https://www.openssl.org/docs/man1.0.2/ssl/SSL_CTX_set_options.html">https://www.openssl.org/docs/man1.0.2/ssl/SSL_CTX_set_options.html</a>.</td>
+    <a href="https://www.openssl.org/docs/man3.0/man3/SSL_CTX_set_options.html">https://www.openssl.org/docs/man3.0/man3/SSL_CTX_set_options.html</a>.</td>
   </tr>
   <tr>
     <td><code>SSL_OP_CISCO_ANYCONNECT</code></td>
@@ -5830,42 +5770,8 @@ See the [list of SSL OP Flags][] for details.
     workaround added in OpenSSL 0.9.6d.</td>
   </tr>
   <tr>
-    <td><code>SSL_OP_EPHEMERAL_RSA</code></td>
-    <td>Instructs OpenSSL to always use the tmp_rsa key when performing RSA
-    operations.</td>
-  </tr>
-  <tr>
     <td><code>SSL_OP_LEGACY_SERVER_CONNECT</code></td>
     <td>Allows initial connection to servers that do not support RI.</td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_MICROSOFT_BIG_SSLV3_BUFFER</code></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_MICROSOFT_SESS_ID_BUG</code></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_MSIE_SSLV2_RSA_PADDING</code></td>
-    <td>Instructs OpenSSL to disable the workaround for a man-in-the-middle
-    protocol-version vulnerability in the SSL 2.0 server implementation.</td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_NETSCAPE_CA_DN_BUG</code></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_NETSCAPE_CHALLENGE_BUG</code></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_NETSCAPE_DEMO_CIPHER_CHANGE_BUG</code></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_NETSCAPE_REUSE_CIPHER_CHANGE_BUG</code></td>
-    <td></td>
   </tr>
   <tr>
     <td><code>SSL_OP_NO_COMPRESSION</code></td>
@@ -5917,46 +5823,12 @@ See the [list of SSL OP Flags][] for details.
     <td>Instructs OpenSSL to turn off TLS v1.3</td>
   </tr>
   <tr>
-    <td><code>SSL_OP_PKCS1_CHECK_1</code></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_PKCS1_CHECK_2</code></td>
-    <td></td>
-  </tr>
-  <tr>
     <td><code>SSL_OP_PRIORITIZE_CHACHA</code></td>
     <td>Instructs OpenSSL server to prioritize ChaCha20-Poly1305
     when the client does.
     This option has no effect if
     <code>SSL_OP_CIPHER_SERVER_PREFERENCE</code>
     is not enabled.</td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_SINGLE_DH_USE</code></td>
-    <td>Instructs OpenSSL to always create a new key when using
-    temporary/ephemeral DH parameters.</td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_SINGLE_ECDH_USE</code></td>
-    <td>Instructs OpenSSL to always create a new key when using
-    temporary/ephemeral ECDH parameters.</td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_SSLEAY_080_CLIENT_DH_BUG</code></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_SSLREF2_REUSE_CERT_TYPE_BUG</code></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_TLS_BLOCK_PADDING_BUG</code></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><code>SSL_OP_TLS_D5_BUG</code></td>
-    <td></td>
   </tr>
   <tr>
     <td><code>SSL_OP_TLS_ROLLBACK_BUG</code></td>
@@ -6038,10 +5910,6 @@ See the [list of SSL OP Flags][] for details.
   </tr>
   <tr>
     <td><code>DH_NOT_SUITABLE_GENERATOR</code></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td><code>ALPN_ENABLED</code></td>
     <td></td>
   </tr>
   <tr>

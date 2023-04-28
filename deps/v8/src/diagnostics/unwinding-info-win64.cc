@@ -21,52 +21,22 @@
 // This has to come after windows.h.
 #include <versionhelpers.h>  // For IsWindows8OrGreater().
 
-// Forward declaration to keep this independent of Win8
-NTSYSAPI
-DWORD
-NTAPI
-RtlAddGrowableFunctionTable(
-    _Out_ PVOID* DynamicTable,
-    _In_reads_(MaximumEntryCount) PRUNTIME_FUNCTION FunctionTable,
-    _In_ DWORD EntryCount,
-    _In_ DWORD MaximumEntryCount,
-    _In_ ULONG_PTR RangeBase,
-    _In_ ULONG_PTR RangeEnd
-    );
-
-
-NTSYSAPI
-void
-NTAPI
-RtlGrowFunctionTable(
-    _Inout_ PVOID DynamicTable,
-    _In_ DWORD NewEntryCount
-    );
-
-
-NTSYSAPI
-void
-NTAPI
-RtlDeleteGrowableFunctionTable(
-    _In_ PVOID DynamicTable
-    );
-
 namespace v8 {
 namespace internal {
 namespace win64_unwindinfo {
 
-bool CanEmitUnwindInfoForBuiltins() { return FLAG_win64_unwinding_info; }
+bool CanEmitUnwindInfoForBuiltins() { return v8_flags.win64_unwinding_info; }
 
 bool CanRegisterUnwindInfoForNonABICompliantCodeRange() {
-  return !FLAG_jitless;
+  return !v8_flags.jitless;
 }
 
 bool RegisterUnwindInfoForExceptionHandlingOnly() {
   DCHECK(CanRegisterUnwindInfoForNonABICompliantCodeRange());
 #if defined(V8_OS_WIN_ARM64)
-  return !FLAG_win64_unwinding_info;
+  return !v8_flags.win64_unwinding_info;
 #else
-  return !IsWindows8OrGreater() || !FLAG_win64_unwinding_info;
+  return !IsWindows8OrGreater() || !v8_flags.win64_unwinding_info;
 #endif
 }
 
@@ -477,7 +447,7 @@ void InitUnwindingRecord(Record* record, size_t code_size_in_bytes) {
   // Hardcoded thunk.
   AssemblerOptions options;
   options.record_reloc_info_for_serialization = false;
-  TurboAssembler masm(nullptr, options, CodeObjectRequired::kNo,
+  MacroAssembler masm(nullptr, options, CodeObjectRequired::kNo,
                       NewAssemblerBuffer(64));
   masm.Mov(x16,
            Operand(reinterpret_cast<uint64_t>(&CRASH_HANDLER_FUNCTION_NAME)));

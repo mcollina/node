@@ -378,7 +378,7 @@ TEST_F(DisasmRiscv64Test, RV32D) {
   COMPARE(fsgnjx_d(ft0, ft8, fa5), "22fe2053       fsgnjx.d  ft0, ft8, fa5");
   COMPARE(fmin_d(ft0, ft8, fa5), "2afe0053       fmin.d    ft0, ft8, fa5");
   COMPARE(fmax_d(ft0, ft8, fa5), "2afe1053       fmax.d    ft0, ft8, fa5");
-  COMPARE(fcvt_s_d(ft0, ft8, RDN), "401e2053       fcvt.s.d  [RDN] ft0, t3");
+  COMPARE(fcvt_s_d(ft0, ft8, RDN), "401e2053       fcvt.s.d  [RDN] ft0, ft8");
   COMPARE(fcvt_d_s(ft0, fa0), "42050053       fcvt.d.s  ft0, fa0");
   COMPARE(feq_d(a0, ft8, fa5), "a2fe2553       feq.d     a0, ft8, fa5");
   COMPARE(flt_d(a0, ft8, fa5), "a2fe1553       flt.d     a0, ft8, fa5");
@@ -469,7 +469,7 @@ TEST_F(DisasmRiscv64Test, PSEUDO) {
 }
 #ifdef V8_TARGET_ARCH_RISCV64
 TEST_F(DisasmRiscv64Test, RV64C) {
-  i::FLAG_riscv_c_extension = true;
+  i::v8_flags.riscv_c_extension = true;
   SET_UP();
 
   COMPARE(c_nop(), "00000001       nop");

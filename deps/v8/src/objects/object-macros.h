@@ -18,14 +18,14 @@
 
 // Since this changes visibility, it should always be last in a class
 // definition.
-#define OBJECT_CONSTRUCTORS(Type, ...)             \
- public:                                           \
-  constexpr Type() : __VA_ARGS__() {}              \
-                                                   \
- protected:                                        \
-  template <typename TFieldType, int kFieldOffset> \
-  friend class TaggedField;                        \
-                                                   \
+#define OBJECT_CONSTRUCTORS(Type, ...)                                         \
+ public:                                                                       \
+  constexpr Type() : __VA_ARGS__() {}                                          \
+                                                                               \
+ protected:                                                                    \
+  template <typename TFieldType, int kFieldOffset, typename CompressionScheme> \
+  friend class TaggedField;                                                    \
+                                                                               \
   explicit inline Type(Address ptr)
 
 #define OBJECT_CONSTRUCTORS_IMPL(Type, Super) \
@@ -73,6 +73,9 @@
 
 #define DECL_RELAXED_INT32_ACCESSORS(name) \
   DECL_RELAXED_PRIMITIVE_ACCESSORS(name, int32_t)
+
+#define DECL_RELAXED_UINT32_ACCESSORS(name) \
+  DECL_RELAXED_PRIMITIVE_ACCESSORS(name, uint32_t)
 
 #define DECL_RELAXED_UINT16_ACCESSORS(name) \
   DECL_RELAXED_PRIMITIVE_ACCESSORS(name, uint16_t)
@@ -183,6 +186,14 @@
   }                                                         \
   void holder::set_##name(int32_t value, RelaxedStoreTag) { \
     RELAXED_WRITE_INT32_FIELD(*this, offset, value);        \
+  }
+
+#define RELAXED_UINT32_ACCESSORS(holder, name, offset)       \
+  uint32_t holder::name(RelaxedLoadTag) const {              \
+    return RELAXED_READ_UINT32_FIELD(*this, offset);         \
+  }                                                          \
+  void holder::set_##name(uint32_t value, RelaxedStoreTag) { \
+    RELAXED_WRITE_UINT32_FIELD(*this, offset, value);        \
   }
 
 #define RELAXED_UINT16_ACCESSORS(holder, name, offset)       \
@@ -698,15 +709,15 @@ static_assert(sizeof(unsigned) == sizeof(uint32_t),
     set(IndexForEntry(i) + k##name##Offset, value);             \
   }
 
-#define TQ_OBJECT_CONSTRUCTORS(Type)               \
- public:                                           \
-  constexpr Type() = default;                      \
-                                                   \
- protected:                                        \
-  template <typename TFieldType, int kFieldOffset> \
-  friend class TaggedField;                        \
-                                                   \
-  inline explicit Type(Address ptr);               \
+#define TQ_OBJECT_CONSTRUCTORS(Type)                                           \
+ public:                                                                       \
+  constexpr Type() = default;                                                  \
+                                                                               \
+ protected:                                                                    \
+  template <typename TFieldType, int kFieldOffset, typename CompressionScheme> \
+  friend class TaggedField;                                                    \
+                                                                               \
+  inline explicit Type(Address ptr);                                           \
   friend class TorqueGenerated##Type<Type, Super>;
 
 #define TQ_OBJECT_CONSTRUCTORS_IMPL(Type) \

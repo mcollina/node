@@ -59,7 +59,6 @@ Local<FunctionTemplate> X509Certificate::GetConstructorTemplate(
     tmpl = NewFunctionTemplate(isolate, nullptr);
     tmpl->InstanceTemplate()->SetInternalFieldCount(
         BaseObject::kInternalFieldCount);
-    tmpl->Inherit(BaseObject::GetConstructorTemplate(env));
     tmpl->SetClassName(
         FIXED_ONE_BYTE_STRING(env->isolate(), "X509Certificate"));
     SetProtoMethod(isolate, tmpl, "subject", Subject);
@@ -136,7 +135,6 @@ MaybeLocal<Object> X509Certificate::GetPeerCert(
     const SSLPointer& ssl,
     GetPeerCertificateFlag flag) {
   ClearErrorOnReturn clear_error_on_return;
-  Local<Object> obj;
   MaybeLocal<Object> maybe_cert;
 
   bool is_server =
@@ -340,6 +338,7 @@ void X509Certificate::Pem(const FunctionCallbackInfo<Value>& args) {
 
 void X509Certificate::CheckCA(const FunctionCallbackInfo<Value>& args) {
   X509Certificate* cert;
+  ClearErrorOnReturn clear_error_on_return;
   ASSIGN_OR_RETURN_UNWRAP(&cert, args.Holder());
   args.GetReturnValue().Set(X509_check_ca(cert->get()) == 1);
 }
@@ -440,6 +439,8 @@ void X509Certificate::CheckIssued(const FunctionCallbackInfo<Value>& args) {
   X509Certificate* issuer;
   ASSIGN_OR_RETURN_UNWRAP(&issuer, args[0]);
 
+  ClearErrorOnReturn clear_error_on_return;
+
   args.GetReturnValue().Set(
     X509_check_issued(issuer->get(), cert->get()) == X509_V_OK);
 }
@@ -452,6 +453,8 @@ void X509Certificate::CheckPrivateKey(const FunctionCallbackInfo<Value>& args) {
   KeyObjectHandle* key;
   ASSIGN_OR_RETURN_UNWRAP(&key, args[0]);
   CHECK_EQ(key->Data()->GetKeyType(), kKeyTypePrivate);
+
+  ClearErrorOnReturn clear_error_on_return;
 
   args.GetReturnValue().Set(
       X509_check_private_key(
@@ -468,6 +471,8 @@ void X509Certificate::Verify(const FunctionCallbackInfo<Value>& args) {
   ASSIGN_OR_RETURN_UNWRAP(&key, args[0]);
   CHECK_EQ(key->Data()->GetKeyType(), kKeyTypePublic);
 
+  ClearErrorOnReturn clear_error_on_return;
+
   args.GetReturnValue().Set(
       X509_verify(
           cert->get(),
@@ -478,6 +483,7 @@ void X509Certificate::ToLegacy(const FunctionCallbackInfo<Value>& args) {
   Environment* env = Environment::GetCurrent(args);
   X509Certificate* cert;
   ASSIGN_OR_RETURN_UNWRAP(&cert, args.Holder());
+  ClearErrorOnReturn clear_error_on_return;
   Local<Value> ret;
   if (X509ToObject(env, cert->get()).ToLocal(&ret))
     args.GetReturnValue().Set(ret);

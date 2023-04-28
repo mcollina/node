@@ -462,7 +462,6 @@ void Initialize(Local<Object> target,
 
   ser->InstanceTemplate()->SetInternalFieldCount(
       SerializerContext::kInternalFieldCount);
-  ser->Inherit(BaseObject::GetConstructorTemplate(env));
 
   SetProtoMethod(isolate, ser, "writeHeader", SerializerContext::WriteHeader);
   SetProtoMethod(isolate, ser, "writeValue", SerializerContext::WriteValue);
@@ -490,7 +489,6 @@ void Initialize(Local<Object> target,
 
   des->InstanceTemplate()->SetInternalFieldCount(
       DeserializerContext::kInternalFieldCount);
-  des->Inherit(BaseObject::GetConstructorTemplate(env));
 
   SetProtoMethod(isolate, des, "readHeader", DeserializerContext::ReadHeader);
   SetProtoMethod(isolate, des, "readValue", DeserializerContext::ReadValue);
@@ -540,5 +538,6 @@ void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
 }  // namespace serdes
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(serdes, node::serdes::Initialize)
-NODE_MODULE_EXTERNAL_REFERENCE(serdes, node::serdes::RegisterExternalReferences)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(serdes, node::serdes::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(serdes,
+                                node::serdes::RegisterExternalReferences)

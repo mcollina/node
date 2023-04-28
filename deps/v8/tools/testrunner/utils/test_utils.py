@@ -14,6 +14,7 @@ import unittest
 from contextlib import contextmanager
 from dataclasses import dataclass
 from io import StringIO
+from mock import patch
 from os.path import dirname as up
 
 from testrunner.local.command import BaseCommand
@@ -82,6 +83,8 @@ def clean_json_output(json_path, basedir):
   # Extract relevant properties of the json output.
   if not json_path:
     return None
+  if not os.path.exists(json_path):
+    return '--file-does-not-exists--'
   with open(json_path) as f:
     json_output = json.load(f)
 
@@ -183,9 +186,35 @@ class TestRunnerTest(unittest.TestCase):
         json_out = clean_json_output(json_out_path, basedir)
         return TestResult(stdout.getvalue(), stderr.getvalue(), code, json_out, self)
 
-    def get_runner_class():
-      """Implement to return the runner class"""
-      return None
+  def get_runner_options(self, baseroot='testroot1'):
+    """Returns a list of all flags parsed by the test runner."""
+    with temp_base(baseroot=baseroot) as basedir:
+      runner = self.get_runner_class()(basedir=basedir)
+      parser = runner._create_parser()
+      return [i.get_opt_string() for i in parser.option_list]
+
+  def get_runner_class():
+    """Implement to return the runner class"""
+    return None
+
+  @contextmanager
+  def with_fake_rdb(self):
+    records = []
+
+    def fake_sink():
+      return True
+
+    class Fake_RPC:
+
+      def __init__(self, sink):
+        pass
+
+      def send(self, r):
+        records.append(r)
+
+    with patch('testrunner.testproc.progress.rdb_sink', fake_sink), \
+        patch('testrunner.testproc.resultdb.ResultDB_RPC', Fake_RPC):
+      yield records
 
 
 class FakeOSContext(DefaultOSContext):
@@ -214,7 +243,7 @@ class FakeCommand(BaseCommand):
                timeout=60,
                env=None,
                verbose=False,
-               resources_func=None,
+               test_case=None,
                handle_sigterm=False):
     f_prefix = ['fake_wrapper'] + cmd_prefix
     super(FakeCommand, self).__init__(

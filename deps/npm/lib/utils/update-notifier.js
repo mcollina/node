@@ -3,12 +3,9 @@
 // Check daily for betas, and weekly otherwise.
 
 const pacote = require('pacote')
-const ciDetect = require('@npmcli/ci-detect')
+const ciInfo = require('ci-info')
 const semver = require('semver')
-const chalk = require('chalk')
-const { promisify } = require('util')
-const stat = promisify(require('fs').stat)
-const writeFile = promisify(require('fs').writeFile)
+const { stat, writeFile } = require('fs/promises')
 const { resolve } = require('path')
 
 const SKIP = Symbol('SKIP')
@@ -39,7 +36,7 @@ const updateNotifier = async (npm, spec = 'latest') => {
   // never check for updates in CI, when updating npm already, or opted out
   if (!npm.config.get('update-notifier') ||
       isGlobalNpmUpdate(npm) ||
-      ciDetect()) {
+      ciInfo.isCI) {
     return SKIP
   }
 
@@ -60,10 +57,6 @@ const updateNotifier = async (npm, spec = 'latest') => {
   if (!(await checkTimeout(npm, duration))) {
     return null
   }
-
-  // if they're currently using a prerelease, nudge to the next prerelease
-  // otherwise, nudge to latest.
-  const useColor = npm.logColor
 
   const mani = await pacote.manifest(`npm@${spec}`, {
     // always prefer latest, even if doing --tag=whatever on the cmd
@@ -91,6 +84,9 @@ const updateNotifier = async (npm, spec = 'latest') => {
     return null
   }
 
+  const useColor = npm.logColor
+  const chalk = npm.logChalk
+
   // ok!  notify the user about this update they should get.
   // The message is saved for printing at process exit so it will not get
   // lost in any other messages being printed as part of the command.
@@ -99,12 +95,11 @@ const updateNotifier = async (npm, spec = 'latest') => {
     : update.minor !== current.minor ? 'minor'
     : update.patch !== current.patch ? 'patch'
     : 'prerelease'
-  const typec = !useColor ? type
-    : type === 'major' ? chalk.red(type)
+  const typec = type === 'major' ? chalk.red(type)
     : type === 'minor' ? chalk.yellow(type)
     : chalk.green(type)
-  const oldc = !useColor ? current : chalk.red(current)
-  const latestc = !useColor ? latest : chalk.green(latest)
+  const oldc = chalk.red(current)
+  const latestc = chalk.green(latest)
   const changelog = `https://github.com/npm/cli/releases/tag/v${latest}`
   const changelogc = !useColor ? `<${changelog}>` : chalk.cyan(changelog)
   const cmd = `npm install -g npm@${latest}`

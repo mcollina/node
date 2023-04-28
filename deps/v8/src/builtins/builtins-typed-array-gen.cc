@@ -64,12 +64,21 @@ TNode<JSArrayBuffer> TypedArrayBuiltinsAssembler::AllocateEmptyOnHeapBuffer(
   StoreObjectFieldNoWriteBarrier(buffer, JSArrayBuffer::kBitFieldOffset,
                                  Int32Constant(bitfield_value));
 
-  StoreObjectFieldNoWriteBarrier(buffer, JSArrayBuffer::kByteLengthOffset,
-                                 UintPtrConstant(0));
+  StoreObjectFieldNoWriteBarrier(buffer, JSArrayBuffer::kDetachKeyOffset,
+                                 UndefinedConstant());
+  StoreBoundedSizeToObject(buffer, JSArrayBuffer::kRawByteLengthOffset,
+                           UintPtrConstant(0));
   StoreSandboxedPointerToObject(buffer, JSArrayBuffer::kBackingStoreOffset,
                                 EmptyBackingStoreBufferConstant());
+#ifdef V8_COMPRESS_POINTERS
+  // When pointer compression is enabled, the extension slot contains a
+  // (lazily-initialized) external pointer handle.
+  StoreObjectFieldNoWriteBarrier(buffer, JSArrayBuffer::kExtensionOffset,
+                                 ExternalPointerHandleNullConstant());
+#else
   StoreObjectFieldNoWriteBarrier(buffer, JSArrayBuffer::kExtensionOffset,
                                  IntPtrConstant(0));
+#endif
   for (int offset = JSArrayBuffer::kHeaderSize;
        offset < JSArrayBuffer::kSizeWithEmbedderFields; offset += kTaggedSize) {
     // TODO(v8:10391, saelo): Handle external pointers in EmbedderDataSlot
@@ -141,7 +150,7 @@ TF_BUILTIN(TypedArrayPrototypeByteLength, TypedArrayBuiltinsAssembler) {
     // Default to zero if the {receiver}s buffer was detached.
     TNode<UintPtrT> byte_length = Select<UintPtrT>(
         IsDetachedBuffer(receiver_buffer), [=] { return UintPtrConstant(0); },
-        [=] { return LoadJSArrayBufferViewRawByteLength(receiver_array); });
+        [=] { return LoadJSArrayBufferViewByteLength(receiver_array); });
     Return(ChangeUintPtrToTagged(byte_length));
   }
 }
@@ -501,17 +510,20 @@ template <typename TValue>
 void TypedArrayBuiltinsAssembler::StoreJSTypedArrayElementFromPreparedValue(
     TNode<Context> context, TNode<JSTypedArray> typed_array,
     TNode<UintPtrT> index, TNode<TValue> prepared_value,
-    ElementsKind elements_kind, Label* if_detached) {
+    ElementsKind elements_kind, Label* if_detached_or_out_of_bounds) {
   static_assert(
       std::is_same<TValue, Word32T>::value ||
           std::is_same<TValue, Float32T>::value ||
           std::is_same<TValue, Float64T>::value ||
           std::is_same<TValue, BigInt>::value,
       "Only Word32T, Float32T, Float64T or BigInt values are allowed");
-  // ToNumber/ToBigInt may execute JavaScript code, which could detach
-  // the array's buffer.
-  TNode<JSArrayBuffer> buffer = LoadJSArrayBufferViewBuffer(typed_array);
-  GotoIf(IsDetachedBuffer(buffer), if_detached);
+  // ToNumber/ToBigInt (or other functions called by the upper level) may
+  // execute JavaScript code, which could detach the TypedArray's buffer or make
+  // the TypedArray out of bounds.
+  TNode<UintPtrT> length = LoadJSTypedArrayLengthAndCheckDetached(
+      typed_array, if_detached_or_out_of_bounds);
+  GotoIf(UintPtrGreaterThanOrEqual(index, length),
+         if_detached_or_out_of_bounds);
 
   TNode<RawPtrT> data_ptr = LoadJSTypedArrayDataPtr(typed_array);
   StoreElement(data_ptr, elements_kind, index, prepared_value);
@@ -520,7 +532,7 @@ void TypedArrayBuiltinsAssembler::StoreJSTypedArrayElementFromPreparedValue(
 void TypedArrayBuiltinsAssembler::StoreJSTypedArrayElementFromTagged(
     TNode<Context> context, TNode<JSTypedArray> typed_array,
     TNode<UintPtrT> index, TNode<Object> value, ElementsKind elements_kind,
-    Label* if_detached) {
+    Label* if_detached_or_out_of_bounds) {
   switch (elements_kind) {
     case UINT8_ELEMENTS:
     case INT8_ELEMENTS:
@@ -533,7 +545,7 @@ void TypedArrayBuiltinsAssembler::StoreJSTypedArrayElementFromTagged(
           value, elements_kind, context);
       StoreJSTypedArrayElementFromPreparedValue(context, typed_array, index,
                                                 prepared_value, elements_kind,
-                                                if_detached);
+                                                if_detached_or_out_of_bounds);
       break;
     }
     case FLOAT32_ELEMENTS: {
@@ -541,7 +553,7 @@ void TypedArrayBuiltinsAssembler::StoreJSTypedArrayElementFromTagged(
           value, elements_kind, context);
       StoreJSTypedArrayElementFromPreparedValue(context, typed_array, index,
                                                 prepared_value, elements_kind,
-                                                if_detached);
+                                                if_detached_or_out_of_bounds);
       break;
     }
     case FLOAT64_ELEMENTS: {
@@ -549,7 +561,7 @@ void TypedArrayBuiltinsAssembler::StoreJSTypedArrayElementFromTagged(
           value, elements_kind, context);
       StoreJSTypedArrayElementFromPreparedValue(context, typed_array, index,
                                                 prepared_value, elements_kind,
-                                                if_detached);
+                                                if_detached_or_out_of_bounds);
       break;
     }
     case BIGINT64_ELEMENTS:
@@ -558,7 +570,7 @@ void TypedArrayBuiltinsAssembler::StoreJSTypedArrayElementFromTagged(
           value, elements_kind, context);
       StoreJSTypedArrayElementFromPreparedValue(context, typed_array, index,
                                                 prepared_value, elements_kind,
-                                                if_detached);
+                                                if_detached_or_out_of_bounds);
       break;
     }
     default:

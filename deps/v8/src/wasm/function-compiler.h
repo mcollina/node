@@ -33,6 +33,31 @@ class WasmCode;
 class WasmEngine;
 struct WasmFunction;
 
+// Stores assumptions that a Wasm compilation job made while executing,
+// so they can be checked for continued validity when the job finishes.
+class AssumptionsJournal {
+ public:
+  AssumptionsJournal() = default;
+
+  void RecordAssumption(uint32_t func_index, WellKnownImport status) {
+    imports_.push_back(std::make_pair(func_index, status));
+  }
+
+  const std::vector<std::pair<uint32_t, WellKnownImport>>& import_statuses() {
+    return imports_;
+  }
+
+  bool empty() const { return imports_.empty(); }
+
+ private:
+  // This is not particularly efficient, but it's probably good enough.
+  // For most compilations, this won't hold any entries. If it does
+  // hold entries, their number is expected to be small, because most
+  // functions don't call many imports, and many imports won't be
+  // specially recognized.
+  std::vector<std::pair<uint32_t, WellKnownImport>> imports_;
+};
+
 struct WasmCompilationResult {
  public:
   MOVE_ONLY_WITH_DEFAULT_CONSTRUCTORS(WasmCompilationResult);
@@ -44,26 +69,31 @@ struct WasmCompilationResult {
 
   bool succeeded() const { return code_desc.buffer != nullptr; }
   bool failed() const { return !succeeded(); }
-  operator bool() const { return succeeded(); }
+  explicit operator bool() const { return succeeded(); }
 
   CodeDesc code_desc;
   std::unique_ptr<AssemblerBuffer> instr_buffer;
   uint32_t frame_slot_count = 0;
   uint32_t tagged_parameter_slots = 0;
   base::OwnedVector<byte> source_positions;
+  base::OwnedVector<byte> inlining_positions;
   base::OwnedVector<byte> protected_instructions_data;
+  std::unique_ptr<AssumptionsJournal> assumptions;
   int func_index = kAnonymousFuncIndex;
   ExecutionTier requested_tier;
   ExecutionTier result_tier;
   Kind kind = kFunction;
-  ForDebugging for_debugging = kNoDebugging;
-  int feedback_vector_slots = 0;
+  ForDebugging for_debugging = kNotForDebugging;
+  bool frame_has_feedback_slot = false;
 };
 
 class V8_EXPORT_PRIVATE WasmCompilationUnit final {
  public:
   WasmCompilationUnit(int index, ExecutionTier tier, ForDebugging for_debugging)
-      : func_index_(index), tier_(tier), for_debugging_(for_debugging) {}
+      : func_index_(index), tier_(tier), for_debugging_(for_debugging) {
+    DCHECK_IMPLIES(for_debugging != ForDebugging::kNotForDebugging,
+                   tier_ == ExecutionTier::kLiftoff);
+  }
 
   WasmCompilationResult ExecuteCompilation(CompilationEnv*,
                                            const WireBytesStorage*, Counters*,
@@ -74,7 +104,7 @@ class V8_EXPORT_PRIVATE WasmCompilationUnit final {
   ForDebugging for_debugging() const { return for_debugging_; }
   int func_index() const { return func_index_; }
 
-  static void CompileWasmFunction(Isolate*, NativeModule*,
+  static void CompileWasmFunction(Counters*, NativeModule*,
                                   WasmFeatures* detected, const WasmFunction*,
                                   ExecutionTier);
 
@@ -104,6 +134,7 @@ class V8_EXPORT_PRIVATE JSToWasmWrapperCompilationUnit final {
   enum AllowGeneric : bool { kAllowGeneric = true, kDontAllowGeneric = false };
 
   JSToWasmWrapperCompilationUnit(Isolate* isolate, const FunctionSig* sig,
+                                 uint32_t canonical_sig_index,
                                  const wasm::WasmModule* module, bool is_import,
                                  const WasmFeatures& enabled_features,
                                  AllowGeneric allow_generic);
@@ -112,22 +143,24 @@ class V8_EXPORT_PRIVATE JSToWasmWrapperCompilationUnit final {
   Isolate* isolate() const { return isolate_; }
 
   void Execute();
-  Handle<CodeT> Finalize();
+  Handle<Code> Finalize();
 
   bool is_import() const { return is_import_; }
   const FunctionSig* sig() const { return sig_; }
+  uint32_t canonical_sig_index() const { return canonical_sig_index_; }
 
   // Run a compilation unit synchronously.
-  static Handle<CodeT> CompileJSToWasmWrapper(Isolate* isolate,
-                                              const FunctionSig* sig,
-                                              const WasmModule* module,
-                                              bool is_import);
+  static Handle<Code> CompileJSToWasmWrapper(Isolate* isolate,
+                                             const FunctionSig* sig,
+                                             uint32_t canonical_sig_index,
+                                             const WasmModule* module,
+                                             bool is_import);
 
   // Run a compilation unit synchronously, but ask for the specific
   // wrapper.
-  static Handle<CodeT> CompileSpecificJSToWasmWrapper(Isolate* isolate,
-                                                      const FunctionSig* sig,
-                                                      const WasmModule* module);
+  static Handle<Code> CompileSpecificJSToWasmWrapper(
+      Isolate* isolate, const FunctionSig* sig, uint32_t canonical_sig_index,
+      const WasmModule* module);
 
  private:
   // Wrapper compilation is bound to an isolate. Concurrent accesses to the
@@ -137,6 +170,7 @@ class V8_EXPORT_PRIVATE JSToWasmWrapperCompilationUnit final {
   Isolate* isolate_;
   bool is_import_;
   const FunctionSig* sig_;
+  uint32_t canonical_sig_index_;
   bool use_generic_wrapper_;
   std::unique_ptr<TurbofanCompilationJob> job_;
 };

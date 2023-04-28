@@ -259,7 +259,7 @@ class CompressionStream : public AsyncWrap, public ThreadPoolWork {
 
   CompressionStream(Environment* env, Local<Object> wrap)
       : AsyncWrap(env, wrap, AsyncWrap::PROVIDER_ZLIB),
-        ThreadPoolWork(env),
+        ThreadPoolWork(env, "zlib"),
         write_result_(nullptr) {
     MakeWeak();
   }
@@ -313,7 +313,7 @@ class CompressionStream : public AsyncWrap, public ThreadPoolWork {
         flush != Z_FULL_FLUSH &&
         flush != Z_FINISH &&
         flush != Z_BLOCK) {
-      CHECK(0 && "Invalid flush value");
+      UNREACHABLE("Invalid flush value");
     }
 
     if (args[1]->IsNull()) {
@@ -797,7 +797,7 @@ void ZlibContext::DoThreadPoolWork() {
             break;
           }
 
-          // fallthrough
+          [[fallthrough]];
         case 1:
           if (next_expected_header_byte == nullptr) {
             break;
@@ -814,10 +814,10 @@ void ZlibContext::DoThreadPoolWork() {
 
           break;
         default:
-          CHECK(0 && "invalid number of gzip magic number bytes read");
+          UNREACHABLE("invalid number of gzip magic number bytes read");
       }
 
-      // fallthrough
+      [[fallthrough]];
     case INFLATE:
     case GUNZIP:
     case INFLATERAW:
@@ -1430,5 +1430,5 @@ void DefineZlibConstants(Local<Object> target) {
 
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(zlib, node::Initialize)
-NODE_MODULE_EXTERNAL_REFERENCE(zlib, node::RegisterExternalReferences)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(zlib, node::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(zlib, node::RegisterExternalReferences)

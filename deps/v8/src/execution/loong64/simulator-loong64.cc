@@ -45,42 +45,6 @@ uint32_t get_fcsr_condition_bit(uint32_t cc) {
   }
 }
 
-static int64_t MultiplyHighSigned(int64_t u, int64_t v) {
-  uint64_t u0, v0, w0;
-  int64_t u1, v1, w1, w2, t;
-
-  u0 = u & 0xFFFFFFFFL;
-  u1 = u >> 32;
-  v0 = v & 0xFFFFFFFFL;
-  v1 = v >> 32;
-
-  w0 = u0 * v0;
-  t = u1 * v0 + (w0 >> 32);
-  w1 = t & 0xFFFFFFFFL;
-  w2 = t >> 32;
-  w1 = u0 * v1 + w1;
-
-  return u1 * v1 + w2 + (w1 >> 32);
-}
-
-static uint64_t MultiplyHighUnsigned(uint64_t u, uint64_t v) {
-  uint64_t u0, v0, w0;
-  uint64_t u1, v1, w1, w2, t;
-
-  u0 = u & 0xFFFFFFFFL;
-  u1 = u >> 32;
-  v0 = v & 0xFFFFFFFFL;
-  v1 = v >> 32;
-
-  w0 = u0 * v0;
-  t = u1 * v0 + (w0 >> 32);
-  w1 = t & 0xFFFFFFFFL;
-  w2 = t >> 32;
-  w1 = u0 * v1 + w1;
-
-  return u1 * v1 + w2 + (w1 >> 32);
-}
-
 #ifdef PRINT_SIM_LOG
 inline void printf_instr(const char* _Format, ...) {
   va_list varList;
@@ -320,6 +284,10 @@ void Loong64Debugger::PrintAllRegsIncludingFPU() {
 }
 
 void Loong64Debugger::Debug() {
+  if (v8_flags.correctness_fuzzer_suppressions) {
+    PrintF("Debugger disabled for differential fuzzing.\n");
+    return;
+  }
   intptr_t last_pc = -1;
   bool done = false;
 
@@ -1759,7 +1727,7 @@ void Simulator::WriteW(int64_t addr, int32_t value, Instruction* instr) {
 }
 
 void Simulator::WriteConditionalW(int64_t addr, int32_t value,
-                                  Instruction* instr, int32_t rk_reg) {
+                                  Instruction* instr, int32_t* done) {
   if (addr >= 0 && addr < 0x400) {
     // This has to be a nullptr-dereference, drop into debugger.
     PrintF("Memory write to bad address: 0x%08" PRIx64 " , pc=0x%08" PRIxPTR
@@ -1777,9 +1745,9 @@ void Simulator::WriteConditionalW(int64_t addr, int32_t value,
       TraceMemWr(addr, value, WORD);
       int* ptr = reinterpret_cast<int*>(addr);
       *ptr = value;
-      set_register(rk_reg, 1);
+      *done = 1;
     } else {
-      set_register(rk_reg, 0);
+      *done = 0;
     }
     return;
   }
@@ -1833,7 +1801,7 @@ void Simulator::Write2W(int64_t addr, int64_t value, Instruction* instr) {
 }
 
 void Simulator::WriteConditional2W(int64_t addr, int64_t value,
-                                   Instruction* instr, int32_t rk_reg) {
+                                   Instruction* instr, int32_t* done) {
   if (addr >= 0 && addr < 0x400) {
     // This has to be a nullptr-dereference, drop into debugger.
     PrintF("Memory write to bad address: 0x%08" PRIx64 " , pc=0x%08" PRIxPTR
@@ -1852,9 +1820,9 @@ void Simulator::WriteConditional2W(int64_t addr, int64_t value,
       TraceMemWr(addr, value, DWORD);
       int64_t* ptr = reinterpret_cast<int64_t*>(addr);
       *ptr = value;
-      set_register(rk_reg, 1);
+      *done = 1;
     } else {
-      set_register(rk_reg, 0);
+      *done = 0;
     }
     return;
   }
@@ -2903,8 +2871,10 @@ void Simulator::DecodeTypeOp8() {
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si14_se);
       addr = si14_se + rj();
+      int32_t LLbit = 0;
       WriteConditionalW(addr, static_cast<int32_t>(rd()), instr_.instr(),
-                        rd_reg());
+                        &LLbit);
+      set_register(rd_reg(), LLbit);
       break;
     }
     case LL_D: {
@@ -2924,7 +2894,9 @@ void Simulator::DecodeTypeOp8() {
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), si14_se);
       addr = si14_se + rj();
-      WriteConditional2W(addr, rd(), instr_.instr(), rd_reg());
+      int32_t LLbit = 0;
+      WriteConditional2W(addr, rd(), instr_.instr(), &LLbit);
+      set_register(rd_reg(), LLbit);
       break;
     }
     default:
@@ -3793,13 +3765,13 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("MULH_D\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
-      SetResult(rd_reg(), MultiplyHighSigned(rj(), rk()));
+      SetResult(rd_reg(), base::bits::SignedMulHigh64(rj(), rk()));
       break;
     case MULH_DU:
       printf_instr("MULH_DU\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rj_reg()),
                    rj(), Registers::Name(rk_reg()), rk());
-      SetResult(rd_reg(), MultiplyHighUnsigned(rj_u(), rk_u()));
+      SetResult(rd_reg(), base::bits::UnsignedMulHigh64(rj_u(), rk_u()));
       break;
     case MULW_D_W: {
       printf_instr("MULW_D_W\t %s: %016lx, %s, %016lx, %s, %016lx\n",
@@ -4210,7 +4182,7 @@ void Simulator::DecodeTypeOp17() {
       printf_instr("AMSWAP_DB_W:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
-      int32_t rdvalue;
+      int32_t success = 0;
       do {
         {
           base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
@@ -4219,17 +4191,15 @@ void Simulator::DecodeTypeOp17() {
           GlobalMonitor::Get()->NotifyLoadLinked_Locked(
               rj(), &global_monitor_thread_);
         }
-        rdvalue = get_register(rd_reg());
         WriteConditionalW(rj(), static_cast<int32_t>(rk()), instr_.instr(),
-                          rd_reg());
-      } while (!get_register(rd_reg()));
-      set_register(rd_reg(), rdvalue);
+                          &success);
+      } while (!success);
     } break;
     case AMSWAP_DB_D: {
       printf_instr("AMSWAP_DB_D:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
-      int64_t rdvalue;
+      int32_t success = 0;
       do {
         {
           base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
@@ -4238,16 +4208,14 @@ void Simulator::DecodeTypeOp17() {
           GlobalMonitor::Get()->NotifyLoadLinked_Locked(
               rj(), &global_monitor_thread_);
         }
-        rdvalue = get_register(rd_reg());
-        WriteConditional2W(rj(), rk(), instr_.instr(), rd_reg());
-      } while (!get_register(rd_reg()));
-      set_register(rd_reg(), rdvalue);
+        WriteConditional2W(rj(), rk(), instr_.instr(), &success);
+      } while (!success);
     } break;
     case AMADD_DB_W: {
       printf_instr("AMADD_DB_W:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
-      int32_t rdvalue;
+      int32_t success = 0;
       do {
         {
           base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
@@ -4256,19 +4224,17 @@ void Simulator::DecodeTypeOp17() {
           GlobalMonitor::Get()->NotifyLoadLinked_Locked(
               rj(), &global_monitor_thread_);
         }
-        rdvalue = get_register(rd_reg());
         WriteConditionalW(rj(),
                           static_cast<int32_t>(static_cast<int32_t>(rk()) +
                                                static_cast<int32_t>(rd())),
-                          instr_.instr(), rd_reg());
-      } while (!get_register(rd_reg()));
-      set_register(rd_reg(), rdvalue);
+                          instr_.instr(), &success);
+      } while (!success);
     } break;
     case AMADD_DB_D: {
       printf_instr("AMADD_DB_D:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
-      int64_t rdvalue;
+      int32_t success = 0;
       do {
         {
           base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
@@ -4277,16 +4243,14 @@ void Simulator::DecodeTypeOp17() {
           GlobalMonitor::Get()->NotifyLoadLinked_Locked(
               rj(), &global_monitor_thread_);
         }
-        rdvalue = get_register(rd_reg());
-        WriteConditional2W(rj(), rk() + rd(), instr_.instr(), rd_reg());
-      } while (!get_register(rd_reg()));
-      set_register(rd_reg(), rdvalue);
+        WriteConditional2W(rj(), rk() + rd(), instr_.instr(), &success);
+      } while (!success);
     } break;
     case AMAND_DB_W: {
       printf_instr("AMAND_DB_W:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
-      int32_t rdvalue;
+      int32_t success = 0;
       do {
         {
           base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
@@ -4295,19 +4259,17 @@ void Simulator::DecodeTypeOp17() {
           GlobalMonitor::Get()->NotifyLoadLinked_Locked(
               rj(), &global_monitor_thread_);
         }
-        rdvalue = get_register(rd_reg());
         WriteConditionalW(rj(),
                           static_cast<int32_t>(static_cast<int32_t>(rk()) &
                                                static_cast<int32_t>(rd())),
-                          instr_.instr(), rd_reg());
-      } while (!get_register(rd_reg()));
-      set_register(rd_reg(), rdvalue);
+                          instr_.instr(), &success);
+      } while (!success);
     } break;
     case AMAND_DB_D: {
       printf_instr("AMAND_DB_D:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
-      int64_t rdvalue;
+      int32_t success = 0;
       do {
         {
           base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
@@ -4316,16 +4278,14 @@ void Simulator::DecodeTypeOp17() {
           GlobalMonitor::Get()->NotifyLoadLinked_Locked(
               rj(), &global_monitor_thread_);
         }
-        rdvalue = get_register(rd_reg());
-        WriteConditional2W(rj(), rk() & rd(), instr_.instr(), rd_reg());
-      } while (!get_register(rd_reg()));
-      set_register(rd_reg(), rdvalue);
+        WriteConditional2W(rj(), rk() & rd(), instr_.instr(), &success);
+      } while (!success);
     } break;
     case AMOR_DB_W: {
       printf_instr("AMOR_DB_W:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
-      int32_t rdvalue;
+      int32_t success = 0;
       do {
         {
           base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
@@ -4334,19 +4294,17 @@ void Simulator::DecodeTypeOp17() {
           GlobalMonitor::Get()->NotifyLoadLinked_Locked(
               rj(), &global_monitor_thread_);
         }
-        rdvalue = get_register(rd_reg());
         WriteConditionalW(rj(),
                           static_cast<int32_t>(static_cast<int32_t>(rk()) |
                                                static_cast<int32_t>(rd())),
-                          instr_.instr(), rd_reg());
-      } while (!get_register(rd_reg()));
-      set_register(rd_reg(), rdvalue);
+                          instr_.instr(), &success);
+      } while (!success);
     } break;
     case AMOR_DB_D: {
       printf_instr("AMOR_DB_D:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
-      int64_t rdvalue;
+      int32_t success = 0;
       do {
         {
           base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
@@ -4355,16 +4313,14 @@ void Simulator::DecodeTypeOp17() {
           GlobalMonitor::Get()->NotifyLoadLinked_Locked(
               rj(), &global_monitor_thread_);
         }
-        rdvalue = get_register(rd_reg());
-        WriteConditional2W(rj(), rk() | rd(), instr_.instr(), rd_reg());
-      } while (!get_register(rd_reg()));
-      set_register(rd_reg(), rdvalue);
+        WriteConditional2W(rj(), rk() | rd(), instr_.instr(), &success);
+      } while (!success);
     } break;
     case AMXOR_DB_W: {
       printf_instr("AMXOR_DB_W:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
-      int32_t rdvalue;
+      int32_t success = 0;
       do {
         {
           base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
@@ -4373,19 +4329,17 @@ void Simulator::DecodeTypeOp17() {
           GlobalMonitor::Get()->NotifyLoadLinked_Locked(
               rj(), &global_monitor_thread_);
         }
-        rdvalue = get_register(rd_reg());
         WriteConditionalW(rj(),
                           static_cast<int32_t>(static_cast<int32_t>(rk()) ^
                                                static_cast<int32_t>(rd())),
-                          instr_.instr(), rd_reg());
-      } while (!get_register(rd_reg()));
-      set_register(rd_reg(), rdvalue);
+                          instr_.instr(), &success);
+      } while (!success);
     } break;
     case AMXOR_DB_D: {
       printf_instr("AMXOR_DB_D:\t %s: %016lx, %s, %016lx, %s, %016lx\n",
                    Registers::Name(rd_reg()), rd(), Registers::Name(rk_reg()),
                    rk(), Registers::Name(rj_reg()), rj());
-      int64_t rdvalue;
+      int32_t success = 0;
       do {
         {
           base::MutexGuard lock_guard(&GlobalMonitor::Get()->mutex);
@@ -4394,10 +4348,8 @@ void Simulator::DecodeTypeOp17() {
           GlobalMonitor::Get()->NotifyLoadLinked_Locked(
               rj(), &global_monitor_thread_);
         }
-        rdvalue = get_register(rd_reg());
-        WriteConditional2W(rj(), rk() ^ rd(), instr_.instr(), rd_reg());
-      } while (!get_register(rd_reg()));
-      set_register(rd_reg(), rdvalue);
+        WriteConditional2W(rj(), rk() ^ rd(), instr_.instr(), &success);
+      } while (!success);
     } break;
     case AMMAX_DB_W:
       printf("Sim UNIMPLEMENTED: AMMAX_DB_W\n");

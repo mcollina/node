@@ -46,18 +46,17 @@ class V8_EXPORT_PRIVATE StreamingProcessor {
                                         int code_section_start,
                                         int code_section_length) = 0;
 
-  // Process a function body.
-  virtual void ProcessFunctionBody(base::Vector<const uint8_t> bytes,
+  // Process a function body. Returns true if the processing finished
+  // successfully and the decoding should continue.
+  virtual bool ProcessFunctionBody(base::Vector<const uint8_t> bytes,
                                    uint32_t offset) = 0;
 
   // Report the end of a chunk.
   virtual void OnFinishedChunk() = 0;
-  // Report the end of the stream. If the stream was successful, all
-  // received bytes are passed by parameter. If there has been an error, an
-  // empty array is passed.
-  virtual void OnFinishedStream(base::OwnedVector<uint8_t> bytes) = 0;
-  // Report an error detected in the StreamingDecoder.
-  virtual void OnError(const WasmError&) = 0;
+  // Report the end of the stream. This will be called even after an error has
+  // been detected. In any case, the parameter is the total received bytes.
+  virtual void OnFinishedStream(base::OwnedVector<const uint8_t> bytes,
+                                bool after_error) = 0;
   // Report the abortion of the stream.
   virtual void OnAbort() = 0;
 
@@ -80,9 +79,9 @@ class V8_EXPORT_PRIVATE StreamingDecoder {
 
   virtual void Abort() = 0;
 
-  // Notify the StreamingDecoder that compilation ended and the
+  // Notify the StreamingDecoder that the job was discarded and the
   // StreamingProcessor should not be called anymore.
-  virtual void NotifyCompilationEnded() = 0;
+  virtual void NotifyCompilationDiscarded() = 0;
 
   // Caching support.
   // Sets the callback that is called after a new chunk of the module is tiered
@@ -104,10 +103,11 @@ class V8_EXPORT_PRIVATE StreamingDecoder {
   virtual void NotifyNativeModuleCreated(
       const std::shared_ptr<NativeModule>& native_module) = 0;
 
-  base::Vector<const char> url() { return base::VectorOf(url_); }
+  const std::string& url() const { return *url_; }
+  std::shared_ptr<const std::string> shared_url() const { return url_; }
 
   void SetUrl(base::Vector<const char> url) {
-    url_.assign(url.begin(), url.length());
+    url_->assign(url.begin(), url.size());
   }
 
   static std::unique_ptr<StreamingDecoder> CreateAsyncStreamingDecoder(
@@ -121,7 +121,7 @@ class V8_EXPORT_PRIVATE StreamingDecoder {
  protected:
   bool deserializing() const { return !compiled_module_bytes_.empty(); }
 
-  std::string url_;
+  const std::shared_ptr<std::string> url_ = std::make_shared<std::string>();
   MoreFunctionsCanBeSerializedCallback
       more_functions_can_be_serialized_callback_;
   // The content of `compiled_module_bytes_` shouldn't be used until

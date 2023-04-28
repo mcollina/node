@@ -69,10 +69,14 @@ class Profiler;
 class SourcePosition;
 class Ticker;
 
+#if defined(V8_OS_WIN) && defined(V8_ENABLE_ETW_STACK_WALKING)
+class ETWJitLogger;
+#endif
+
 #undef LOG
-#define LOG(isolate, Call)                                         \
-  do {                                                             \
-    if (v8::internal::FLAG_log) (isolate)->v8_file_logger()->Call; \
+#define LOG(isolate, Call)                                             \
+  do {                                                                 \
+    if (v8::internal::v8_flags.log) (isolate)->v8_file_logger()->Call; \
   } while (false)
 
 #define LOG_CODE_EVENT(isolate, Call)                        \
@@ -91,7 +95,7 @@ class ExistingCodeLogger {
   void LogCodeObjects();
   void LogBuiltins();
 
-  void LogCompiledFunctions();
+  void LogCompiledFunctions(bool ensure_source_positions_available = true);
   void LogExistingFunction(
       Handle<SharedFunctionInfo> shared, Handle<AbstractCode> code,
       LogEventListener::CodeTag tag = LogEventListener::CodeTag::kFunction);
@@ -106,14 +110,6 @@ enum class LogSeparator;
 
 class V8FileLogger : public LogEventListener {
  public:
-  enum class ScriptEventType {
-    kReserveId,
-    kCreate,
-    kDeserialize,
-    kBackgroundCompile,
-    kStreamingCompile
-  };
-
   explicit V8FileLogger(Isolate* isolate);
   ~V8FileLogger() override;
 
@@ -133,6 +129,11 @@ class V8FileLogger : public LogEventListener {
 
   // Sets the current code event handler.
   void SetCodeEventHandler(uint32_t options, JitCodeEventHandler event_handler);
+
+#if defined(V8_OS_WIN) && defined(V8_ENABLE_ETW_STACK_WALKING)
+  void SetEtwCodeEventHandler(uint32_t options);
+  void ResetEtwCodeEventHandler();
+#endif
 
   sampler::Sampler* sampler();
   V8_EXPORT_PRIVATE std::string file_name() const;
@@ -189,7 +190,8 @@ class V8FileLogger : public LogEventListener {
   void SetterCallbackEvent(Handle<Name> name, Address entry_point) override;
   void RegExpCodeCreateEvent(Handle<AbstractCode> code,
                              Handle<String> source) override;
-  void CodeMoveEvent(AbstractCode from, AbstractCode to) override;
+  void CodeMoveEvent(InstructionStream from, InstructionStream to) override;
+  void BytecodeMoveEvent(BytecodeArray from, BytecodeArray to) override;
   void SharedFunctionInfoMoveEvent(Address from, Address to) override;
   void NativeContextMoveEvent(Address from, Address to) override {}
   void CodeMovingGCEvent() override;
@@ -261,13 +263,18 @@ class V8FileLogger : public LogEventListener {
   V8_EXPORT_PRIVATE bool is_logging();
 
   bool is_listening_to_code_events() override {
-    return is_logging() || jit_logger_ != nullptr;
+    return
+#if defined(V8_OS_WIN) && defined(V8_ENABLE_ETW_STACK_WALKING)
+        etw_jit_logger_ != nullptr ||
+#endif
+        is_logging() || jit_logger_ != nullptr;
   }
 
   void LogExistingFunction(Handle<SharedFunctionInfo> shared,
                            Handle<AbstractCode> code);
   // Logs all compiled functions found in the heap.
-  V8_EXPORT_PRIVATE void LogCompiledFunctions();
+  V8_EXPORT_PRIVATE void LogCompiledFunctions(
+      bool ensure_source_positions_available = true);
   // Logs all accessor callbacks found in the heap.
   V8_EXPORT_PRIVATE void LogAccessorCallbacks();
   // Used for logging stubs found in the snapshot.
@@ -299,7 +306,7 @@ class V8FileLogger : public LogEventListener {
   void TickEvent(TickSample* sample, bool overflow);
   void RuntimeCallTimerEvent();
 
-  // Logs a StringEvent regardless of whether FLAG_log is true.
+  // Logs a StringEvent regardless of whether v8_flags.log is true.
   void UncheckedStringEvent(const char* name, const char* value);
 
   // Logs a scripts sources. Keeps track of all logged scripts to ensure that
@@ -345,7 +352,7 @@ class V8FileLogger : public LogEventListener {
   std::unique_ptr<JitLogger> gdb_jit_logger_;
 #endif
 #if defined(V8_OS_WIN) && defined(V8_ENABLE_ETW_STACK_WALKING)
-  std::unique_ptr<JitLogger> etw_jit_logger_;
+  std::unique_ptr<ETWJitLogger> etw_jit_logger_;
 #endif
   std::set<int> logged_source_code_;
   uint32_t next_source_info_id_ = 0;
@@ -440,7 +447,7 @@ class V8_EXPORT_PRIVATE CodeEventLogger : public LogEventListener {
  private:
   class NameBuffer;
 
-  virtual void LogRecordedBuffer(Handle<AbstractCode> code,
+  virtual void LogRecordedBuffer(AbstractCode code,
                                  MaybeHandle<SharedFunctionInfo> maybe_shared,
                                  const char* name, int length) = 0;
 #if V8_ENABLE_WEBASSEMBLY
@@ -492,7 +499,8 @@ class ExternalLogEventListener : public LogEventListener {
   void SetterCallbackEvent(Handle<Name> name, Address entry_point) override {}
   void SharedFunctionInfoMoveEvent(Address from, Address to) override {}
   void NativeContextMoveEvent(Address from, Address to) override {}
-  void CodeMoveEvent(AbstractCode from, AbstractCode to) override;
+  void CodeMoveEvent(InstructionStream from, InstructionStream to) override;
+  void BytecodeMoveEvent(BytecodeArray from, BytecodeArray to) override;
   void CodeDisableOptEvent(Handle<AbstractCode> code,
                            Handle<SharedFunctionInfo> shared) override {}
   void CodeMovingGCEvent() override {}

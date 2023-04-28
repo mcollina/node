@@ -138,7 +138,7 @@ HEAP_TEST(MarkCompactCollector) {
   do {
     allocation = AllocateMapForTest(isolate);
   } while (!allocation.IsFailure());
-  CcTest::CollectGarbage(MAP_SPACE);
+  CcTest::CollectGarbage(OLD_SPACE);
   AllocateMapForTest(isolate).ToObjectChecked();
 
   { HandleScope scope(isolate);
@@ -205,8 +205,7 @@ HEAP_TEST(DoNotEvacuatePinnedPages) {
   page->SetFlag(MemoryChunk::PINNED);
 
   CcTest::CollectAllGarbage();
-  heap->mark_compact_collector()->EnsureSweepingCompleted(
-      MarkCompactCollector::SweepingForcedFinalizationMode::kV8Only);
+  heap->EnsureSweepingCompleted(Heap::SweepingForcedFinalizationMode::kV8Only);
 
   // The pinned flag should prevent the page from moving.
   for (Handle<FixedArray> object : handles) {
@@ -216,8 +215,7 @@ HEAP_TEST(DoNotEvacuatePinnedPages) {
   page->ClearFlag(MemoryChunk::PINNED);
 
   CcTest::CollectAllGarbage();
-  heap->mark_compact_collector()->EnsureSweepingCompleted(
-      MarkCompactCollector::SweepingForcedFinalizationMode::kV8Only);
+  heap->EnsureSweepingCompleted(Heap::SweepingForcedFinalizationMode::kV8Only);
 
   // `compact_on_every_full_gc` ensures that this page is an evacuation
   // candidate, so with the pin flag cleared compaction should now move it.
@@ -225,119 +223,6 @@ HEAP_TEST(DoNotEvacuatePinnedPages) {
     CHECK_NE(page, Page::FromHeapObject(*object));
   }
 }
-
-HEAP_TEST(ObjectStartBitmap) {
-#ifdef V8_ENABLE_INNER_POINTER_RESOLUTION_OSB
-  CcTest::InitializeVM();
-  Isolate* isolate = CcTest::i_isolate();
-  v8::HandleScope sc(CcTest::isolate());
-
-  Heap* heap = isolate->heap();
-  heap::SealCurrentObjects(heap);
-
-  auto* factory = isolate->factory();
-
-  Handle<HeapObject> h1 = factory->NewStringFromStaticChars("hello");
-  Handle<HeapObject> h2 = factory->NewStringFromStaticChars("world");
-
-  HeapObject obj1 = *h1;
-  HeapObject obj2 = *h2;
-  Page* page1 = Page::FromHeapObject(obj1);
-  Page* page2 = Page::FromHeapObject(obj2);
-
-  CHECK(page1->object_start_bitmap()->CheckBit(obj1.address()));
-  CHECK(page2->object_start_bitmap()->CheckBit(obj2.address()));
-
-  {
-    // We need a safepoint for calling FindBasePtr.
-    SafepointScope scope(heap);
-
-    for (int k = 0; k < obj1.Size(); ++k) {
-      Address obj1_inner_ptr = obj1.address() + k;
-      CHECK_EQ(obj1.address(),
-               page1->object_start_bitmap()->FindBasePtr(obj1_inner_ptr));
-    }
-    for (int k = 0; k < obj2.Size(); ++k) {
-      Address obj2_inner_ptr = obj2.address() + k;
-      CHECK_EQ(obj2.address(),
-               page2->object_start_bitmap()->FindBasePtr(obj2_inner_ptr));
-    }
-  }
-
-  // TODO(v8:12851): Patch the location of handle h2 with an inner pointer.
-  // For now, garbage collection doesn't work with inner pointers in handles,
-  // so we're sticking to a zero offset.
-  const size_t offset = 0;
-  h2.PatchValue(String::FromAddress(h2->address() + offset));
-
-  CcTest::CollectAllGarbage();
-
-  obj1 = *h1;
-  obj2 = HeapObject::FromAddress(h2->address() - offset);
-  page1 = Page::FromHeapObject(obj1);
-  page2 = Page::FromHeapObject(obj2);
-
-  CHECK(obj1.IsString());
-  CHECK(obj2.IsString());
-
-  // Bits set in the object_start_bitmap are not preserved when objects are
-  // evacuated.
-  CHECK(!page1->object_start_bitmap()->CheckBit(obj1.address()));
-  CHECK(!page2->object_start_bitmap()->CheckBit(obj2.address()));
-
-  {
-    // We need a safepoint for calling FindBasePtr.
-    SafepointScope scope(heap);
-
-    // After FindBasePtr, the bits should be properly set again.
-    for (int k = 0; k < obj1.Size(); ++k) {
-      Address obj1_inner_ptr = obj1.address() + k;
-      CHECK_EQ(obj1.address(),
-               page1->object_start_bitmap()->FindBasePtr(obj1_inner_ptr));
-    }
-    CHECK(page1->object_start_bitmap()->CheckBit(obj1.address()));
-    for (int k = obj2.Size() - 1; k >= 0; --k) {
-      Address obj2_inner_ptr = obj2.address() + k;
-      CHECK_EQ(obj2.address(),
-               page2->object_start_bitmap()->FindBasePtr(obj2_inner_ptr));
-    }
-    CHECK(page2->object_start_bitmap()->CheckBit(obj2.address()));
-  }
-#endif  // V8_ENABLE_INNER_POINTER_RESOLUTION_OSB
-}
-
-// TODO(1600): compaction of map space is temporary removed from GC.
-#if 0
-static Handle<Map> CreateMap(Isolate* isolate) {
-  return isolate->factory()->NewMap(JS_OBJECT_TYPE, JSObject::kHeaderSize);
-}
-
-TEST(MapCompact) {
-  v8_flags.max_map_space_pages = 16;
-  CcTest::InitializeVM();
-  Isolate* isolate = CcTest::i_isolate();
-  Factory* factory = isolate->factory();
-
-  {
-    v8::HandleScope sc;
-    // keep allocating maps while pointers are still encodable and thus
-    // mark compact is permitted.
-    Handle<JSObject> root = factory->NewJSObjectFromMap(CreateMap());
-    do {
-      Handle<Map> map = CreateMap();
-      map->set_prototype(*root);
-      root = factory->NewJSObjectFromMap(map);
-    } while (CcTest::heap()->map_space()->MapPointersEncodable());
-  }
-  // Now, as we don't have any handles to just allocated maps, we should
-  // be able to trigger map compaction.
-  // To give an additional chance to fail, try to force compaction which
-  // should be impossible right now.
-  CcTest::CollectAllGarbage(Heap::kForceCompactionMask);
-  // And now map pointers should be encodable again.
-  CHECK(CcTest::heap()->map_space()->MapPointersEncodable());
-}
-#endif
 
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
@@ -450,11 +335,10 @@ TEST(Regress5829) {
   v8::HandleScope sc(CcTest::isolate());
   Heap* heap = isolate->heap();
   heap::SealCurrentObjects(heap);
-  i::MarkCompactCollector* collector = heap->mark_compact_collector();
   i::IncrementalMarking* marking = heap->incremental_marking();
-  if (collector->sweeping_in_progress()) {
-    collector->EnsureSweepingCompleted(
-        MarkCompactCollector::SweepingForcedFinalizationMode::kV8Only);
+  if (heap->sweeping_in_progress()) {
+    heap->EnsureSweepingCompleted(
+        Heap::SweepingForcedFinalizationMode::kV8Only);
   }
   CHECK(marking->IsMarking() || marking->IsStopped());
   if (marking->IsStopped()) {
@@ -471,7 +355,7 @@ TEST(Regress5829) {
   heap->CreateFillerObjectAt(old_end - kTaggedSize, kTaggedSize);
   heap->old_space()->FreeLinearAllocationArea();
   Page* page = Page::FromAddress(array->address());
-  MarkingState* marking_state = marking->marking_state();
+  MarkingState* marking_state = heap->marking_state();
   for (auto object_and_size :
        LiveObjectRange<kGreyObjects>(page, marking_state->bitmap(page))) {
     CHECK(!object_and_size.first.IsFreeSpaceOrFiller());

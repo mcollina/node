@@ -54,11 +54,13 @@ rules:
     - name: DecompressionStream
       message: Use `const { DecompressionStream } = require('internal/webstreams/compression')` instead of the global.
     - name: DOMException
-      message: Use lazy function `const { lazyDOMException } = require('internal/util');` instead of the global.
+      message: Use lazy function `const { lazyDOMExceptionClass } = require('internal/util');` instead of the global.
     - name: Event
       message: Use `const { Event } = require('internal/event_target');` instead of the global.
     - name: EventTarget
       message: Use `const { EventTarget } = require('internal/event_target');` instead of the global.
+    - name: File
+      message: Use `const { File } = require('buffer');` instead of the global.
     - name: FormData
       message: Use `const { FormData } = require('internal/deps/undici/undici');` instead of the global.
     - name: Headers
@@ -146,7 +148,7 @@ rules:
     - name: clearTimeout
       message: Use `const { clearTimeout } = require('timers');` instead of the global.
     - name: console
-      message: Use `const { console } = require('internal/console/global');` instead of the global.
+      message: Use `const console = require('internal/console/global');` instead of the global.
     - name: crypto
       message: Use `const { crypto } = require('internal/crypto/webcrypto');` instead of the global.
     - name: Crypto

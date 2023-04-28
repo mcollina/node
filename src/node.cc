@@ -39,6 +39,7 @@
 #include "node_realm-inl.h"
 #include "node_report.h"
 #include "node_revert.h"
+#include "node_sea.h"
 #include "node_snapshot_builder.h"
 #include "node_v8_platform-inl.h"
 #include "node_version.h"
@@ -63,6 +64,10 @@
 
 #if HAVE_INSPECTOR
 #include "inspector/worker_inspector.h"  // ParentInspectorHandle
+#endif
+
+#ifdef NODE_ENABLE_VTUNE_PROFILING
+#include "../deps/v8/src/third_party/vtune/v8-vtune.h"
 #endif
 
 #include "large_pages/node_large_page.h"
@@ -118,11 +123,10 @@
 #include <cstring>
 
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace node {
-
-using builtins::BuiltinLoader;
 
 using v8::EscapableHandleScope;
 using v8::Isolate;
@@ -273,15 +277,17 @@ MaybeLocal<Value> StartExecution(Environment* env, StartExecutionCallback cb) {
 
   if (cb != nullptr) {
     EscapableHandleScope scope(env->isolate());
+    // TODO(addaleax): pass the callback to the main script more directly,
+    // e.g. by making StartExecution(env, builtin) parametrizable
+    env->set_embedder_entry_point(std::move(cb));
+    auto reset_entry_point =
+        OnScopeLeave([&]() { env->set_embedder_entry_point({}); });
 
-    if (StartExecution(env, "internal/main/environment").IsEmpty()) return {};
+    const char* entry = env->isolate_data()->options()->build_snapshot
+                            ? "internal/main/mksnapshot"
+                            : "internal/main/embedding";
 
-    StartExecutionCallbackInfo info = {
-        env->process_object(),
-        env->builtin_module_require(),
-    };
-
-    return scope.EscapeMaybe(cb(info));
+    return scope.EscapeMaybe(StartExecution(env, entry));
   }
 
   // TODO(joyeecheung): move these conditions into JS land and let the
@@ -305,7 +311,7 @@ MaybeLocal<Value> StartExecution(Environment* env, StartExecutionCallback cb) {
     return StartExecution(env, "internal/main/inspect");
   }
 
-  if (per_process::cli_options->build_snapshot) {
+  if (env->isolate_data()->options()->build_snapshot) {
     return StartExecution(env, "internal/main/mksnapshot");
   }
 
@@ -331,7 +337,7 @@ MaybeLocal<Value> StartExecution(Environment* env, StartExecutionCallback cb) {
     return StartExecution(env, "internal/main/test_runner");
   }
 
-  if (env->options()->watch_mode && !first_argv.empty()) {
+  if (env->options()->watch_mode) {
     return StartExecution(env, "internal/main/watch_mode");
   }
 
@@ -424,12 +430,29 @@ void ResetSignalHandlers() {
     if (nr == SIGKILL || nr == SIGSTOP)
       continue;
     act.sa_handler = (nr == SIGPIPE || nr == SIGXFSZ) ? SIG_IGN : SIG_DFL;
+    if (act.sa_handler == SIG_DFL) {
+      // The only bad handler value we can inhert from before exec is SIG_IGN
+      // (any actual function pointer is reset to SIG_DFL during exec).
+      // If that's the case, we want to reset it back to SIG_DFL.
+      // However, it's also possible that an embeder (or an LD_PRELOAD-ed
+      // library) has set up own signal handler for own purposes
+      // (e.g. profiling). If that's the case, we want to keep it intact.
+      struct sigaction old;
+      CHECK_EQ(0, sigaction(nr, nullptr, &old));
+      if ((old.sa_flags & SA_SIGINFO) || old.sa_handler != SIG_IGN) continue;
+    }
     CHECK_EQ(0, sigaction(nr, &act, nullptr));
   }
 #endif  // __POSIX__
 }
 
-static std::atomic<uint64_t> init_process_flags = 0;
+// We use uint32_t since that can be accessed as a lock-free atomic
+// variable on all platforms that we support, which we require in
+// order for its value to be usable inside signal handlers.
+static std::atomic<uint32_t> init_process_flags = 0;
+static_assert(
+    std::is_same_v<std::underlying_type_t<ProcessInitializationFlags::Flags>,
+                   uint32_t>);
 
 static void PlatformInit(ProcessInitializationFlags::Flags flags) {
   // init_process_flags is accessed in ResetStdio(),
@@ -453,11 +476,32 @@ static void PlatformInit(ProcessInitializationFlags::Flags flags) {
     for (auto& s : stdio) {
       const int fd = &s - stdio;
       if (fstat(fd, &s.stat) == 0) continue;
+
       // Anything but EBADF means something is seriously wrong.  We don't
       // have to special-case EINTR, fstat() is not interruptible.
       if (errno != EBADF) ABORT();
-      if (fd != open("/dev/null", O_RDWR)) ABORT();
-      if (fstat(fd, &s.stat) != 0) ABORT();
+
+      // If EBADF (file descriptor doesn't exist), open /dev/null and duplicate
+      // its file descriptor to the invalid file descriptor.  Make sure *that*
+      // file descriptor is valid.  POSIX doesn't guarantee the next file
+      // descriptor open(2) gives us is the lowest available number anymore in
+      // POSIX.1-2017, which is why dup2(2) is needed.
+      int null_fd;
+
+      do {
+        null_fd = open("/dev/null", O_RDWR);
+      } while (null_fd < 0 && errno == EINTR);
+
+      if (null_fd != fd) {
+        int err;
+
+        do {
+          err = dup2(null_fd, fd);
+        } while (err < 0 && errno == EINTR);
+        CHECK_EQ(err, 0);
+      }
+
+      if (fstat(fd, &s.stat) < 0) ABORT();
     }
   }
 
@@ -728,8 +772,8 @@ static ExitCode InitializeNodeWithArgsInternal(
   // Initialize node_start_time to get relative uptime.
   per_process::node_start_time = uv_hrtime();
 
-  // Register built-in modules
-  binding::RegisterBuiltinModules();
+  // Register built-in bindings
+  binding::RegisterBuiltinBindings();
 
   // Make inherited handles noninheritable.
   if (!(flags & ProcessInitializationFlags::kEnableStdioInheritance) &&
@@ -769,15 +813,15 @@ static ExitCode InitializeNodeWithArgsInternal(
       env_argv.insert(env_argv.begin(), argv->at(0));
 
       const ExitCode exit_code = ProcessGlobalArgsInternal(
-          &env_argv, nullptr, errors, kAllowedInEnvironment);
+          &env_argv, nullptr, errors, kAllowedInEnvvar);
       if (exit_code != ExitCode::kNoFailure) return exit_code;
     }
   }
 #endif
 
   if (!(flags & ProcessInitializationFlags::kDisableCLIOptions)) {
-    const ExitCode exit_code = ProcessGlobalArgsInternal(
-        argv, exec_argv, errors, kDisallowedInEnvironment);
+    const ExitCode exit_code =
+        ProcessGlobalArgsInternal(argv, exec_argv, errors, kDisallowedInEnvvar);
     if (exit_code != ExitCode::kNoFailure) return exit_code;
   }
 
@@ -1034,7 +1078,7 @@ std::unique_ptr<InitializationResult> InitializeOncePerProcess(
 }
 
 void TearDownOncePerProcess() {
-  const uint64_t flags = init_process_flags.load();
+  const uint32_t flags = init_process_flags.load();
   ResetStdio();
   if (!(flags & ProcessInitializationFlags::kNoDefaultSignalHandling)) {
     ResetSignalHandlers();
@@ -1082,8 +1126,7 @@ ExitCode GenerateAndWriteSnapshotData(const SnapshotData** snapshot_data_ptr,
               "node:embedded_snapshot_main was specified as snapshot "
               "entry point but Node.js was built without embedded "
               "snapshot.\n");
-      // TODO(joyeecheung): should be kInvalidCommandLineArgument instead.
-      exit_code = ExitCode::kGenericUserError;
+      exit_code = ExitCode::kInvalidCommandLineArgument;
       return exit_code;
     }
   } else {
@@ -1110,14 +1153,13 @@ ExitCode GenerateAndWriteSnapshotData(const SnapshotData** snapshot_data_ptr,
 
   FILE* fp = fopen(snapshot_blob_path.c_str(), "wb");
   if (fp != nullptr) {
-    (*snapshot_data_ptr)->ToBlob(fp);
+    (*snapshot_data_ptr)->ToFile(fp);
     fclose(fp);
   } else {
     fprintf(stderr,
             "Cannot open %s for writing a snapshot.\n",
             snapshot_blob_path.c_str());
-    // TODO(joyeecheung): should be kStartupSnapshotFailure.
-    exit_code = ExitCode::kGenericUserError;
+    exit_code = ExitCode::kStartupSnapshotFailure;
   }
   return exit_code;
 }
@@ -1133,19 +1175,19 @@ ExitCode LoadSnapshotDataAndRun(const SnapshotData** snapshot_data_ptr,
     FILE* fp = fopen(filename.c_str(), "rb");
     if (fp == nullptr) {
       fprintf(stderr, "Cannot open %s", filename.c_str());
-      // TODO(joyeecheung): should be kStartupSnapshotFailure.
-      exit_code = ExitCode::kGenericUserError;
+      exit_code = ExitCode::kStartupSnapshotFailure;
       return exit_code;
     }
     std::unique_ptr<SnapshotData> read_data = std::make_unique<SnapshotData>();
-    if (!SnapshotData::FromBlob(read_data.get(), fp)) {
-      // If we fail to read the customized snapshot, simply exit with 1.
-      // TODO(joyeecheung): should be kStartupSnapshotFailure.
-      exit_code = ExitCode::kGenericUserError;
+    bool ok = SnapshotData::FromFile(read_data.get(), fp);
+    fclose(fp);
+    if (!ok) {
+      // If we fail to read the customized snapshot,
+      // simply exit with kStartupSnapshotFailure.
+      exit_code = ExitCode::kStartupSnapshotFailure;
       return exit_code;
     }
     *snapshot_data_ptr = read_data.release();
-    fclose(fp);
   } else if (per_process::cli_options->node_snapshot) {
     // If --snapshot-blob is not specified, we are reading the embedded
     // snapshot, but we will skip it if --no-node-snapshot is specified.
@@ -1158,9 +1200,6 @@ ExitCode LoadSnapshotDataAndRun(const SnapshotData** snapshot_data_ptr,
     }
   }
 
-  if ((*snapshot_data_ptr) != nullptr) {
-    BuiltinLoader::RefreshCodeCache((*snapshot_data_ptr)->code_cache);
-  }
   NodeMainInstance main_instance(*snapshot_data_ptr,
                                  uv_default_loop(),
                                  per_process::v8_platform.Platform(),
@@ -1200,8 +1239,13 @@ static ExitCode StartInternal(int argc, char** argv) {
 
   uv_loop_configure(uv_default_loop(), UV_METRICS_IDLE_TIME);
 
+  std::string sea_config = per_process::cli_options->experimental_sea_config;
+  if (!sea_config.empty()) {
+    return sea::BuildSingleExecutableBlob(sea_config);
+  }
+
   // --build-snapshot indicates that we are in snapshot building mode.
-  if (per_process::cli_options->build_snapshot) {
+  if (per_process::cli_options->per_isolate->build_snapshot) {
     if (result->args().size() < 2) {
       fprintf(stderr,
               "--build-snapshot must be used with an entry point script.\n"
@@ -1216,11 +1260,14 @@ static ExitCode StartInternal(int argc, char** argv) {
 }
 
 int Start(int argc, char** argv) {
+#ifndef DISABLE_SINGLE_EXECUTABLE_APPLICATION
+  std::tie(argc, argv) = sea::FixupArgsForSEA(argc, argv);
+#endif
   return static_cast<int>(StartInternal(argc, argv));
 }
 
-int Stop(Environment* env) {
-  env->ExitEnv();
+int Stop(Environment* env, StopFlags::Flags flags) {
+  env->ExitEnv(flags);
   return 0;
 }
 
@@ -1229,5 +1276,5 @@ int Stop(Environment* env) {
 #if !HAVE_INSPECTOR
 void Initialize() {}
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(inspector, Initialize)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(inspector, Initialize)
 #endif  // !HAVE_INSPECTOR

@@ -14,6 +14,7 @@
 #include "src/common/assert-scope.h"
 #include "src/common/globals.h"
 #include "src/execution/isolate-utils.h"
+#include "src/logging/log.h"
 #include "src/objects/objects-inl.h"
 #include "src/objects/string-inl.h"
 #include "src/strings/string-stream.h"
@@ -28,7 +29,7 @@ const char* const LogFile::kLogToConsole = "-";
 // static
 FILE* LogFile::CreateOutputHandle(std::string file_name) {
   // If we're logging anything, we need to open the log file.
-  if (!FLAG_log) {
+  if (!v8_flags.log) {
     return nullptr;
   } else if (LogFile::IsLoggingToConsole(file_name)) {
     return stdout;

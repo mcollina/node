@@ -100,6 +100,156 @@ If this flag is passed, the behavior can still be set to not abort through
 [`process.setUncaughtExceptionCaptureCallback()`][] (and through usage of the
 `node:domain` module that uses it).
 
+### `--allow-child-process`
+
+<!-- YAML
+added: v20.0.0
+-->
+
+> Stability: 1 - Experimental
+
+When using the [Permission Model][], the process will not be able to spawn any
+child process by default.
+Attempts to do so will throw an `ERR_ACCESS_DENIED` unless the
+user explicitly passes the `--allow-child-process` flag when starting Node.js.
+
+Example:
+
+```js
+const childProcess = require('node:child_process');
+// Attempt to bypass the permission
+childProcess.spawn('node', ['-e', 'require("fs").writeFileSync("/new-file", "example")']);
+```
+
+```console
+$ node --experimental-permission --allow-fs-read=* index.js
+node:internal/child_process:388
+  const err = this._handle.spawn(options);
+                           ^
+Error: Access to this API has been restricted
+    at ChildProcess.spawn (node:internal/child_process:388:28)
+    at Object.spawn (node:child_process:723:9)
+    at Object.<anonymous> (/home/index.js:3:14)
+    at Module._compile (node:internal/modules/cjs/loader:1120:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1174:10)
+    at Module.load (node:internal/modules/cjs/loader:998:32)
+    at Module._load (node:internal/modules/cjs/loader:839:12)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:81:12)
+    at node:internal/main/run_main_module:17:47 {
+  code: 'ERR_ACCESS_DENIED',
+  permission: 'ChildProcess'
+}
+```
+
+### `--allow-fs-read`
+
+<!-- YAML
+added: v20.0.0
+-->
+
+> Stability: 1 - Experimental
+
+This flag configures file system read permissions using
+the [Permission Model][].
+
+The valid arguments for the `--allow-fs-read` flag are:
+
+* `*` - To allow all `FileSystemRead` operations.
+* Paths delimited by comma (`,`) to allow only matching `FileSystemRead`
+  operations.
+
+Examples can be found in the [File System Permissions][] documentation.
+
+Relative paths are NOT yet supported by the CLI flag.
+
+The initializer module also needs to be allowed. Consider the following example:
+
+```console
+$ node --experimental-permission t.js
+node:internal/modules/cjs/loader:162
+  const result = internalModuleStat(filename);
+                 ^
+
+Error: Access to this API has been restricted
+    at stat (node:internal/modules/cjs/loader:162:18)
+    at Module._findPath (node:internal/modules/cjs/loader:640:16)
+    at resolveMainPath (node:internal/modules/run_main:15:25)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:53:24)
+    at node:internal/main/run_main_module:23:47 {
+  code: 'ERR_ACCESS_DENIED',
+  permission: 'FileSystemRead',
+  resource: '/Users/rafaelgss/repos/os/node/t.js'
+}
+```
+
+The process needs to have access to the `index.js` module:
+
+```console
+$ node --experimental-permission --allow-fs-read=/path/to/index.js index.js
+```
+
+### `--allow-fs-write`
+
+<!-- YAML
+added: v20.0.0
+-->
+
+> Stability: 1 - Experimental
+
+This flag configures file system write permissions using
+the [Permission Model][].
+
+The valid arguments for the `--allow-fs-write` flag are:
+
+* `*` - To allow all `FileSystemWrite` operations.
+* Paths delimited by comma (`,`) to allow only matching `FileSystemWrite`
+  operations.
+
+Examples can be found in the [File System Permissions][] documentation.
+
+Relative paths are NOT supported through the CLI flag.
+
+### `--allow-worker`
+
+<!-- YAML
+added: v20.0.0
+-->
+
+> Stability: 1 - Experimental
+
+When using the [Permission Model][], the process will not be able to create any
+worker threads by default.
+For security reasons, the call will throw an `ERR_ACCESS_DENIED` unless the
+user explicitly pass the flag `--allow-worker` in the main Node.js process.
+
+Example:
+
+```js
+const { Worker } = require('node:worker_threads');
+// Attempt to bypass the permission
+new Worker(__filename);
+```
+
+```console
+$ node --experimental-permission --allow-fs-read=* index.js
+node:internal/worker:188
+    this[kHandle] = new WorkerImpl(url,
+                    ^
+
+Error: Access to this API has been restricted
+    at new Worker (node:internal/worker:188:21)
+    at Object.<anonymous> (/home/index.js.js:3:1)
+    at Module._compile (node:internal/modules/cjs/loader:1120:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1174:10)
+    at Module.load (node:internal/modules/cjs/loader:998:32)
+    at Module._load (node:internal/modules/cjs/loader:839:12)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:81:12)
+    at node:internal/main/run_main_module:17:47 {
+  code: 'ERR_ACCESS_DENIED',
+  permission: 'WorkerThreads'
+}
+```
+
 ### `--build-snapshot`
 
 <!-- YAML
@@ -119,7 +269,7 @@ the path specified by `--snapshot-blob`.
 ```console
 $ echo "globalThis.foo = 'I am from the snapshot'" > snapshot.js
 
-# Run snapshot.js to intialize the application and snapshot the
+# Run snapshot.js to initialize the application and snapshot the
 # state of it into snapshot.blob.
 $ node --snapshot-blob snapshot.blob --build-snapshot snapshot.js
 
@@ -169,7 +319,7 @@ $ node --completion-bash > node_bash_completion
 $ source node_bash_completion
 ```
 
-### `-C=condition`, `--conditions=condition`
+### `-C condition`, `--conditions=condition`
 
 <!-- YAML
 added:
@@ -190,7 +340,7 @@ The default Node.js conditions of `"node"`, `"default"`, `"import"`, and
 For example, to run a module with "development" resolutions:
 
 ```console
-$ node -C=development app.js
+$ node -C development app.js
 ```
 
 ### `--cpu-prof`
@@ -314,6 +464,21 @@ added: v6.0.0
 Enable FIPS-compliant crypto at startup. (Requires Node.js to be built
 against FIPS-compatible OpenSSL.)
 
+### `--no-network-family-autoselection`
+
+<!-- YAML
+added: v19.4.0
+changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/46790
+    description: The flag was renamed from `--no-enable-network-family-autoselection`
+                 to `--no-network-family-autoselection`. The old name can still work as
+                 an alias.
+-->
+
+Disables the family autoselection algorithm unless connection options explicitly
+enables it.
+
 ### `--enable-source-maps`
 
 <!-- YAML
@@ -377,6 +542,20 @@ added:
 
 Enable experimental support for the `https:` protocol in `import` specifiers.
 
+### `--experimental-permission`
+
+<!-- YAML
+added: v20.0.0
+-->
+
+Enable the Permission Model for current process. When enabled, the
+following permissions are restricted:
+
+* File System - manageable through
+  \[`--allow-fs-read`]\[],\[`allow-fs-write`]\[] flags
+* Child Process - manageable through \[`--allow-child-process`]\[] flag
+* Worker Threads - manageable through \[`--allow-worker`]\[] flag
+
 ### `--experimental-policy`
 
 <!-- YAML
@@ -396,7 +575,7 @@ Disable experimental support for the [Fetch API][].
 ### `--no-experimental-global-webcrypto`
 
 <!-- YAML
-added: REPLACEME
+added: v19.0.0
 -->
 
 Disable exposition of [Web Crypto API][] on the global scope.
@@ -404,7 +583,7 @@ Disable exposition of [Web Crypto API][] on the global scope.
 ### `--no-experimental-global-customevent`
 
 <!-- YAML
-added: REPLACEME
+added: v19.0.0
 -->
 
 Disable exposition of [CustomEvent Web API][] on the global scope.
@@ -417,10 +596,24 @@ added: v16.6.0
 
 Use this flag to disable top-level await in REPL.
 
+### `--experimental-sea-config`
+
+<!-- YAML
+added: v20.0.0
+-->
+
+> Stability: 1 - Experimental
+
+Use this flag to generate a blob that can be injected into the Node.js
+binary to produce a [single executable application][]. See the documentation
+about [this configuration][`--experimental-sea-config`] for details.
+
 ### `--experimental-shadow-realm`
 
 <!-- YAML
-added: REPLACEME
+added:
+  - v19.0.0
+  - v18.13.0
 -->
 
 Use this flag to enable [ShadowRealm][] support.
@@ -441,6 +634,19 @@ added: REPLACEME
 
 Disable experimental support for `worker_threads.SynchronousWorker`.
 
+### `--experimental-test-coverage`
+
+<!-- YAML
+added:
+  - v19.7.0
+  - v18.15.0
+-->
+
+When used in conjunction with the `node:test` module, a code coverage report is
+generated as part of the test runner output. If no tests are run, a coverage
+report is not generated. See the documentation on
+[collecting code coverage from tests][] for more details.
+
 ### `--experimental-vm-modules`
 
 <!-- YAML
@@ -456,6 +662,10 @@ added:
   - v13.3.0
   - v12.16.0
 changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/47286
+    description: This option is no longer required as WASI is
+                 enabled by default, but can still be passed.
   - version: v13.6.0
     pr-url: https://github.com/nodejs/node/pull/30980
     description: changed from `--experimental-wasi-unstable-preview0` to
@@ -658,7 +868,7 @@ Specify ICU data load path. (Overrides `NODE_ICU_DATA`.)
 ### `--import=module`
 
 <!-- YAML
-added: REPLACEME
+added: v19.0.0
 -->
 
 > Stability: 1 - Experimental
@@ -874,6 +1084,7 @@ against FIPS-enabled OpenSSL.
 added:
   - v18.5.0
   - v16.17.0
+  - v14.21.0
 -->
 
 Enable OpenSSL default configuration section, `openssl_conf` to be read from
@@ -1202,21 +1413,21 @@ added: v18.8.0
 > Stability: 1 - Experimental
 
 When used with `--build-snapshot`, `--snapshot-blob` specifies the path
-where the generated snapshot blob will be written to. If not specified,
-the generated blob will be written, by default, to `snapshot.blob`
-in the current working directory.
+where the generated snapshot blob is written to. If not specified, the
+generated blob is written to `snapshot.blob` in the current working directory.
 
 When used without `--build-snapshot`, `--snapshot-blob` specifies the
-path to the blob that will be used to restore the application state.
+path to the blob that is used to restore the application state.
 
 When loading a snapshot, Node.js checks that:
 
-1. The version, architecture and platform of the running Node.js binary
+1. The version, architecture, and platform of the running Node.js binary
    are exactly the same as that of the binary that generates the snapshot.
 2. The V8 flags and CPU features are compatible with that of the binary
    that generates the snapshot.
 
-If they don't match, Node.js would refuse to load the snapshot and exit with 1.
+If they don't match, Node.js refuses to load the snapshot and exits with
+status code 1.
 
 ### `--test`
 
@@ -1224,21 +1435,65 @@ If they don't match, Node.js would refuse to load the snapshot and exit with 1.
 added:
   - v18.1.0
   - v16.17.0
+changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/46983
+    description: The test runner is now stable.
+  - version:
+      - v19.2.0
+      - v18.13.0
+    pr-url: https://github.com/nodejs/node/pull/45214
+    description: Test runner now supports running in watch mode.
 -->
 
 Starts the Node.js command line test runner. This flag cannot be combined with
-`--check`, `--eval`, `--interactive`, or the inspector. See the documentation
-on [running tests from the command line][] for more details.
+`--watch-path`, `--check`, `--eval`, `--interactive`, or the inspector.
+See the documentation on [running tests from the command line][]
+for more details.
 
 ### `--test-name-pattern`
 
 <!-- YAML
 added: v18.11.0
+changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/46983
+    description: The test runner is now stable.
 -->
 
 A regular expression that configures the test runner to only execute tests
 whose name matches the provided pattern. See the documentation on
 [filtering tests by name][] for more details.
+
+### `--test-reporter`
+
+<!-- YAML
+added:
+  - v19.6.0
+  - v18.15.0
+changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/46983
+    description: The test runner is now stable.
+-->
+
+A test reporter to use when running tests. See the documentation on
+[test reporters][] for more details.
+
+### `--test-reporter-destination`
+
+<!-- YAML
+added:
+  - v19.6.0
+  - v18.15.0
+changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/46983
+    description: The test runner is now stable.
+-->
+
+The destination for the corresponding test reporter. See the documentation on
+[test reporters][] for more details.
 
 ### `--test-only`
 
@@ -1246,6 +1501,10 @@ whose name matches the provided pattern. See the documentation on
 added:
   - v18.0.0
   - v16.17.0
+changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/46983
+    description: The test runner is now stable.
 -->
 
 Configures the test runner to only execute top level tests that have the `only`
@@ -1515,14 +1774,6 @@ occurs. One of the following modes can be chosen:
 If a rejection happens during the command line entry point's ES module static
 loading phase, it will always raise it as an uncaught exception.
 
-### `--update-assert-snapshot`
-
-<!-- YAML
-added: v18.8.0
--->
-
-Updates snapshot files used by [`assert.snapshot()`][].
-
 ### `--use-bundled-ca`, `--use-openssl-ca`
 
 <!-- YAML
@@ -1580,16 +1831,25 @@ added: v5.10.0
 
 Set V8's thread pool size which will be used to allocate background jobs.
 
-If set to `0` then V8 will choose an appropriate size of the thread pool based
-on the number of online processors.
+If set to `0` then Node.js will choose an appropriate size of the thread pool
+based on an estimate of the amount of parallelism.
 
-If the value provided is larger than V8's maximum, then the largest value
-will be chosen.
+The amount of parallelism refers to the number of computations that can be
+carried out simultaneously in a given machine. In general, it's the same as the
+amount of CPUs, but it may diverge in environments such as VMs or containers.
 
 ### `--watch`
 
 <!-- YAML
-added: v18.11.0
+added:
+  - v18.11.0
+  - v16.19.0
+changes:
+  - version:
+      - v19.2.0
+      - v18.13.0
+    pr-url: https://github.com/nodejs/node/pull/45214
+    description: Test runner now supports running in watch mode.
 -->
 
 > Stability: 1 - Experimental
@@ -1611,7 +1871,9 @@ $ node --watch index.js
 ### `--watch-path`
 
 <!-- YAML
-added: v18.11.0
+added:
+  - v18.11.0
+  - v16.19.0
 -->
 
 > Stability: 1 - Experimental
@@ -1623,7 +1885,7 @@ This will turn off watching of required or imported modules, even when used in
 combination with `--watch`.
 
 This flag cannot be combined with
-`--check`, `--eval`, `--interactive`, or the REPL.
+`--check`, `--eval`, `--interactive`, `--test`, or the REPL.
 
 ```console
 $ node --watch-path=./src --watch-path=./tests index.js
@@ -1632,6 +1894,14 @@ $ node --watch-path=./src --watch-path=./tests index.js
 This option is only supported on macOS and Windows.
 An `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM` exception will be thrown
 when the option is used on a platform that does not support it.
+
+### `--watch-preserve-output`
+
+Disable the clearing of the console when watch mode restarts the process.
+
+```console
+$ node --watch --watch-preserve-output test.js
+```
 
 ### `--zero-fill-buffers`
 
@@ -1840,11 +2110,16 @@ Node.js options that are allowed are:
 
 <!-- node-options-node start -->
 
+* `--allow-child-process`
+* `--allow-fs-read`
+* `--allow-fs-write`
+* `--allow-worker`
 * `--conditions`, `-C`
 * `--diagnostic-dir`
 * `--disable-proto`
 * `--dns-result-order`
 * `--enable-fips`
+* `--enable-network-family-autoselection`
 * `--enable-source-maps`
 * `--experimental-abortcontroller`
 * `--experimental-import-meta-resolve`
@@ -1852,6 +2127,7 @@ Node.js options that are allowed are:
 * `--experimental-loader`
 * `--experimental-modules`
 * `--experimental-network-imports`
+* `--experimental-permission`
 * `--experimental-policy`
 * `--experimental-shadow-realm`
 * `--experimental-specifier-resolution`
@@ -1886,6 +2162,7 @@ Node.js options that are allowed are:
 * `--no-extra-info-on-fatal-exception`
 * `--no-force-async-hooks-checks`
 * `--no-global-search-paths`
+* `--no-network-family-autoselection`
 * `--no-warnings`
 * `--node-memory-debug`
 * `--openssl-config`
@@ -1909,6 +2186,8 @@ Node.js options that are allowed are:
 * `--secure-heap`
 * `--snapshot-blob`
 * `--test-only`
+* `--test-reporter-destination`
+* `--test-reporter`
 * `--throw-deprecation`
 * `--title`
 * `--tls-cipher-list`
@@ -1932,12 +2211,12 @@ Node.js options that are allowed are:
 * `--trace-warnings`
 * `--track-heap-objects`
 * `--unhandled-rejections`
-* `--update-assert-snapshot`
 * `--use-bundled-ca`
 * `--use-largepages`
 * `--use-openssl-ca`
 * `--v8-pool-size`
 * `--watch-path`
+* `--watch-preserve-output`
 * `--watch`
 * `--zero-fill-buffers`
 
@@ -1949,10 +2228,12 @@ V8 options that are allowed are:
 
 * `--abort-on-uncaught-exception`
 * `--disallow-code-generation-from-strings`
+* `--enable-etw-stack-walking`
 * `--huge-max-old-generation-size`
 * `--interpreted-frames-native-stack`
 * `--jitless`
 * `--max-old-space-size`
+* `--max-semi-space-size`
 * `--perf-basic-prof-only-functions`
 * `--perf-basic-prof`
 * `--perf-prof-unwinding-info`
@@ -1963,6 +2244,8 @@ V8 options that are allowed are:
 
 `--perf-basic-prof-only-functions`, `--perf-basic-prof`,
 `--perf-prof-unwinding-info`, and `--perf-prof` are only available on Linux.
+
+`--enable-etw-stack-walking` is only available on Windows.
 
 ### `NODE_PATH=path[:…]`
 
@@ -2045,6 +2328,11 @@ added: v14.5.0
 If `value` equals `'1'`, the check for a supported platform is skipped during
 Node.js startup. Node.js might not execute correctly. Any issues encountered
 on unsupported platforms will not be fixed.
+
+### `NODE_TEST_CONTEXT=value`
+
+If `value` equals `'child'`, test reporter options will be overridden and test
+output will be sent to stdout in the TAP format.
 
 ### `NODE_TLS_REJECT_UNAUTHORIZED=value`
 
@@ -2284,9 +2572,11 @@ done
 [ECMAScript module]: esm.md#modules-ecmascript-modules
 [ECMAScript module loader]: esm.md#loaders
 [Fetch API]: https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API
+[File System Permissions]: permissions.md#file-system-permissions
 [Modules loaders]: packages.md#modules-loaders
 [Node.js issue tracker]: https://github.com/nodejs/node/issues
 [OSSL_PROVIDER-legacy]: https://www.openssl.org/docs/man3.0/man7/OSSL_PROVIDER-legacy.html
+[Permission Model]: permissions.md#permission-model
 [REPL]: repl.md
 [ScriptCoverage]: https://chromedevtools.github.io/devtools-protocol/tot/Profiler#type-ScriptCoverage
 [ShadowRealm]: https://github.com/tc39/proposal-shadowrealm
@@ -2297,6 +2587,7 @@ done
 [`"type"`]: packages.md#type
 [`--cpu-prof-dir`]: #--cpu-prof-dir
 [`--diagnostic-dir`]: #--diagnostic-dirdirectory
+[`--experimental-sea-config`]: single-executable-applications.md#generating-single-executable-preparation-blobs
 [`--experimental-wasm-modules`]: #--experimental-wasm-modules
 [`--heap-prof-dir`]: #--heap-prof-dir
 [`--import`]: #--importmodule
@@ -2311,7 +2602,6 @@ done
 [`NO_COLOR`]: https://no-color.org
 [`SlowBuffer`]: buffer.md#class-slowbuffer
 [`YoungGenerationSizeFromSemiSpaceSize`]: https://chromium.googlesource.com/v8/v8.git/+/refs/tags/10.3.129/src/heap/heap.cc#328
-[`assert.snapshot()`]: assert.md#assertsnapshotvalue-name
 [`dns.lookup()`]: dns.md#dnslookuphostname-options-callback
 [`dns.setDefaultResultOrder()`]: dns.md#dnssetdefaultresultorderorder
 [`dnsPromises.lookup()`]: dns.md#dnspromiseslookuphostname-options
@@ -2322,6 +2612,7 @@ done
 [`unhandledRejection`]: process.md#event-unhandledrejection
 [`v8.startupSnapshot` API]: v8.md#startup-snapshot-api
 [`worker_threads.threadId`]: worker_threads.md#workerthreadid
+[collecting code coverage from tests]: test.md#collecting-code-coverage
 [conditional exports]: packages.md#conditional-exports
 [context-aware]: addons.md#context-aware-addons
 [debugger]: debugger.md
@@ -2335,6 +2626,8 @@ done
 [scavenge garbage collector]: https://v8.dev/blog/orinoco-parallel-scavenger
 [security warning]: #warning-binding-inspector-to-a-public-ipport-combination-is-insecure
 [semi-space]: https://www.memorymanagement.org/glossary/s.html#semi.space
+[single executable application]: single-executable-applications.md
+[test reporters]: test.md#test-reporters
 [timezone IDs]: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 [tracking issue for user-land snapshots]: https://github.com/nodejs/node/issues/44014
 [ways that `TZ` is handled in other environments]: https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html

@@ -25,8 +25,13 @@ namespace v8 {
 namespace internal {
 
 class IsCompiledScope;
+class FeedbackVectorSpec;
 
-enum class UpdateFeedbackMode { kOptionalFeedback, kGuaranteedFeedback };
+enum class UpdateFeedbackMode {
+  kOptionalFeedback,
+  kGuaranteedFeedback,
+  kNoFeedback,
+};
 
 // Which feedback slots to clear in Clear().
 enum class ClearBehavior {
@@ -62,7 +67,6 @@ enum class FeedbackSlotKind : uint8_t {
   kBinaryOp,
   kCompareOp,
   kDefineKeyedOwnPropertyInLiteral,
-  kTypeProfile,
   kLiteral,
   kForIn,
   kInstanceOf,
@@ -134,10 +138,6 @@ inline bool IsGlobalICKind(FeedbackSlotKind kind) {
   return IsLoadGlobalICKind(kind) || IsStoreGlobalICKind(kind);
 }
 
-inline bool IsTypeProfileKind(FeedbackSlotKind kind) {
-  return kind == FeedbackSlotKind::kTypeProfile;
-}
-
 inline bool IsCloneObjectKind(FeedbackSlotKind kind) {
   return kind == FeedbackSlotKind::kCloneObject;
 }
@@ -207,11 +207,6 @@ class FeedbackVector
   DEFINE_TORQUE_GENERATED_FEEDBACK_VECTOR_FLAGS()
   static_assert(TieringState::kLastTieringState <= TieringStateBits::kMax);
 
-  static const bool kFeedbackVectorMaybeOptimizedCodeIsStoreRelease = true;
-  using TorqueGeneratedFeedbackVector<FeedbackVector,
-                                      HeapObject>::maybe_optimized_code;
-  DECL_RELEASE_ACQUIRE_WEAK_ACCESSORS(maybe_optimized_code)
-
   static constexpr uint32_t kFlagsMaybeHasTurbofanCode =
       FeedbackVector::MaybeHasTurbofanCodeBit::kMask;
   static constexpr uint32_t kFlagsMaybeHasMaglevCode =
@@ -259,7 +254,7 @@ class FeedbackVector
   // The `osr_state` contains the osr_urgency and maybe_has_optimized_osr_code.
   inline void reset_osr_state();
 
-  inline CodeT optimized_code() const;
+  inline Code optimized_code() const;
   // Whether maybe_optimized_code contains a cached Code object.
   inline bool has_optimized_code() const;
 
@@ -273,16 +268,17 @@ class FeedbackVector
   inline bool maybe_has_turbofan_code() const;
   inline void set_maybe_has_turbofan_code(bool value);
 
-  void SetOptimizedCode(CodeT code);
-  void EvictOptimizedCodeMarkedForDeoptimization(SharedFunctionInfo shared,
+  void SetOptimizedCode(Code code);
+  void EvictOptimizedCodeMarkedForDeoptimization(Isolate* isolate,
+                                                 SharedFunctionInfo shared,
                                                  const char* reason);
   void ClearOptimizedCode();
 
   // Optimized OSR'd code is cached in JumpLoop feedback vector slots. The
   // slots either contain a Code object or the ClearedValue.
-  inline base::Optional<CodeT> GetOptimizedOsrCode(Isolate* isolate,
-                                                   FeedbackSlot slot);
-  void SetOptimizedOsrCode(FeedbackSlot slot, CodeT code);
+  inline base::Optional<Code> GetOptimizedOsrCode(Isolate* isolate,
+                                                  FeedbackSlot slot);
+  void SetOptimizedOsrCode(FeedbackSlot slot, Code code);
 
   inline TieringState tiering_state() const;
   void set_tiering_state(TieringState state);
@@ -321,13 +317,14 @@ class FeedbackVector
   V8_EXPORT_PRIVATE FeedbackSlotKind GetKind(FeedbackSlot slot,
                                              AcquireLoadTag tag) const;
 
-  FeedbackSlot GetTypeProfileSlot() const;
-
   V8_EXPORT_PRIVATE static Handle<FeedbackVector> New(
       Isolate* isolate, Handle<SharedFunctionInfo> shared,
       Handle<ClosureFeedbackCellArray> closure_feedback_cell_array,
+      Handle<FeedbackCell> parent_feedback_cell,
       IsCompiledScope* is_compiled_scope);
 
+  V8_EXPORT_PRIVATE static Handle<FeedbackVector> NewForTesting(
+      Isolate* isolate, const FeedbackVectorSpec* spec);
   V8_EXPORT_PRIVATE static Handle<FeedbackVector>
   NewWithOneBinarySlotForTesting(Zone* zone, Isolate* isolate);
   V8_EXPORT_PRIVATE static Handle<FeedbackVector>
@@ -345,7 +342,6 @@ class FeedbackVector
   DEFINE_SLOT_KIND_PREDICATE(IsDefineNamedOwnIC)
   DEFINE_SLOT_KIND_PREDICATE(IsStoreGlobalIC)
   DEFINE_SLOT_KIND_PREDICATE(IsKeyedStoreIC)
-  DEFINE_SLOT_KIND_PREDICATE(IsTypeProfile)
 #undef DEFINE_SLOT_KIND_PREDICATE
 
   // Returns typeof mode encoded into kind of given slot.
@@ -436,13 +432,6 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
     return slot_kinds_.at(slot.ToInt());
   }
 
-  bool HasTypeProfileSlot() const;
-
-  // If used, the TypeProfileSlot is always added as the first slot and its
-  // index is constant. If other slots are added before the TypeProfileSlot,
-  // this number changes.
-  static const int kTypeProfileSlotIndex = 0;
-
   FeedbackSlot AddCallICSlot() { return AddSlot(FeedbackSlotKind::kCall); }
 
   FeedbackSlot AddLoadICSlot() {
@@ -523,8 +512,6 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
   FeedbackSlot AddDefineKeyedOwnPropertyInLiteralICSlot() {
     return AddSlot(FeedbackSlotKind::kDefineKeyedOwnPropertyInLiteral);
   }
-
-  FeedbackSlot AddTypeProfileSlot();
 
   FeedbackSlot AddCloneObjectSlot() {
     return AddSlot(FeedbackSlotKind::kCloneObject);
@@ -611,7 +598,6 @@ class FeedbackMetadata : public HeapObject {
   DECL_VERIFIER(FeedbackMetadata)
 
   static const char* Kind2String(FeedbackSlotKind kind);
-  bool HasTypeProfileSlot() const;
 
   // Garbage collection support.
   // This includes any necessary padding at the end of the object for pointer
@@ -901,16 +887,6 @@ class V8_EXPORT_PRIVATE FeedbackNexus final {
 
   // Make sure we don't overflow the smi.
   static_assert(LEXICAL_MODE_BIT_FIELDS_Ranges::kBitsCount <= kSmiValueSize);
-
-  // For TypeProfile feedback vector slots.
-  // ResetTypeProfile will always reset type profile information.
-  void ResetTypeProfile();
-
-  // Add a type to the list of types for source position <position>.
-  void Collect(Handle<String> type, int position);
-
-  std::vector<int> GetSourcePositions() const;
-  std::vector<Handle<String>> GetTypesForSourcePositions(uint32_t pos) const;
 
  private:
   template <typename FeedbackType>

@@ -18,6 +18,11 @@ namespace compiler {
 
 class MachineGraph;
 
+// Recomputes wasm-gc types along the graph to assign the narrowest possible
+// type to each node.
+// Specifically, struct field accesses, array element accesses, phis, type
+// casts, and type guards are retyped.
+// Types in loops are computed to a fixed point.
 class WasmTyper final : public AdvancedReducer {
  public:
   WasmTyper(Editor* editor, MachineGraph* mcgraph, uint32_t function_index);
@@ -28,7 +33,6 @@ class WasmTyper final : public AdvancedReducer {
 
  private:
   uint32_t function_index_;
-  MachineGraph* mcgraph_;
   Zone* graph_zone_;
 };
 

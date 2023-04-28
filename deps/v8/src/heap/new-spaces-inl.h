@@ -61,6 +61,7 @@ V8_WARN_UNUSED_RESULT inline AllocationResult NewSpace::AllocateRawSynchronized(
 V8_INLINE bool SemiSpaceNewSpace::EnsureAllocation(
     int size_in_bytes, AllocationAlignment alignment, AllocationOrigin origin,
     int* out_max_aligned_size) {
+  size_in_bytes = ALIGN_TO_ALLOCATION_ALIGNMENT(size_in_bytes);
   DCHECK_SEMISPACE_ALLOCATION_INFO(allocation_info_, to_space_);
 #if DEBUG
   VerifyTop();
@@ -93,7 +94,7 @@ V8_INLINE bool SemiSpaceNewSpace::EnsureAllocation(
   }
 
   DCHECK(old_top + aligned_size_in_bytes <= high);
-  UpdateInlineAllocationLimit(aligned_size_in_bytes);
+  UpdateInlineAllocationLimitForAllocation(aligned_size_in_bytes);
   DCHECK_EQ(allocation_info_.start(), allocation_info_.top());
   DCHECK_SEMISPACE_ALLOCATION_INFO(allocation_info_, to_space_);
   return true;
@@ -107,8 +108,11 @@ V8_INLINE bool PagedSpaceForNewSpace::EnsureAllocation(
     int* out_max_aligned_size) {
   if (!PagedSpaceBase::EnsureAllocation(size_in_bytes, alignment, origin,
                                         out_max_aligned_size)) {
-    return false;
+    if (!AddPageBeyondCapacity(size_in_bytes, origin)) {
+      return false;
+    }
   }
+
   allocated_linear_areas_ += limit() - top();
   return true;
 }
@@ -116,22 +120,21 @@ V8_INLINE bool PagedSpaceForNewSpace::EnsureAllocation(
 // -----------------------------------------------------------------------------
 // SemiSpaceObjectIterator
 
+SemiSpaceObjectIterator::SemiSpaceObjectIterator(const SemiSpaceNewSpace* space)
+    : current_(space->first_allocatable_address()) {}
+
 HeapObject SemiSpaceObjectIterator::Next() {
-  while (current_ != limit_) {
+  while (true) {
     if (Page::IsAlignedToPageSize(current_)) {
       Page* page = Page::FromAllocationAreaAddress(current_);
       page = page->next_page();
-      DCHECK(page);
+      if (page == nullptr) return HeapObject();
       current_ = page->area_start();
-      if (current_ == limit_) return HeapObject();
     }
     HeapObject object = HeapObject::FromAddress(current_);
-    current_ += object.Size();
-    if (!object.IsFreeSpaceOrFiller()) {
-      return object;
-    }
+    current_ += ALIGN_TO_ALLOCATION_ALIGNMENT(object.Size());
+    if (!object.IsFreeSpaceOrFiller()) return object;
   }
-  return HeapObject();
 }
 
 }  // namespace internal

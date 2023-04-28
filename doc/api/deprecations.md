@@ -872,6 +872,9 @@ The [`require.extensions`][] property is deprecated.
 
 <!-- YAML
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/47202
+    description: Runtime deprecation.
   - version: v16.6.0
     pr-url: https://github.com/nodejs/node/pull/38444
     description: Added support for `--pending-deprecation`.
@@ -880,7 +883,7 @@ changes:
     description: Documentation-only deprecation.
 -->
 
-Type: Documentation-only (supports [`--pending-deprecation`][])
+Type: Runtime
 
 The [`punycode`][] module is deprecated. Please use a userland alternative
 instead.
@@ -1864,14 +1867,18 @@ bits are allowed. Authentication tags of other lengths are invalid per
 
 <!-- YAML
 changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/47182
+    description: End-of-Life.
   - version: v10.0.0
     pr-url: https://github.com/nodejs/node/pull/18333
     description: Runtime deprecation.
 -->
 
-Type: Runtime
+Type: End-of-Life
 
-The [`crypto.DEFAULT_ENCODING`][] property is deprecated.
+The `crypto.DEFAULT_ENCODING` property only existed for compatibility with
+Node.js releases prior to versions 0.9.3 and has been removed.
 
 ### DEP0092: Top-level `this` bound to `module.exports`
 
@@ -2288,7 +2295,9 @@ future release.
 
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version:
+      - v19.0.0
+      - v18.13.0
     pr-url: https://github.com/nodejs/node/pull/44919
     description: \`url.parse()` is deprecated again in DEP0169.
   - version:
@@ -2892,7 +2901,7 @@ Prefer [`message.socket`][] over [`message.connection`][].
 
 <!-- YAML
 changes:
-  - version: v18.10.0
+  - version: v19.0.0
     pr-url: https://github.com/nodejs/node/pull/43627
     description: End-of-Life.
   - version: v16.0.0
@@ -2973,12 +2982,15 @@ option, or a non-nullish non-boolean value for `verbatim` option in
 
 <!-- YAML
 changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/45653
+    description: Runtime deprecation.
   - version: v16.10.0
     pr-url: https://github.com/nodejs/node/pull/39927
     description: Documentation-only deprecation.
 -->
 
-Type: Documentation-only (supports [`--pending-deprecation`][])
+Type: Runtime
 
 The `'hash'` and `'mgf1Hash'` options are replaced with `'hashAlgorithm'`
 and `'mgf1HashAlgorithm'`.
@@ -3055,7 +3067,7 @@ const w = new Writable({
   async final(callback) {
     await someOp();
     callback();
-  }
+  },
 });
 ```
 
@@ -3134,7 +3146,7 @@ resources and not the actual references.
 
 <!-- YAML
 changes:
-  - version: v18.10.0
+  - version: v19.0.0
     pr-url: https://github.com/nodejs/node/pull/42796
     description: End-of-Life.
   - version: v18.0.0
@@ -3178,7 +3190,10 @@ thing instead.
 
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/43716
+    description: End-of-Life.
+  - version: v19.0.0
     pr-url: https://github.com/nodejs/node/pull/44711
     description: Runtime deprecation.
   - version:
@@ -3195,7 +3210,7 @@ changes:
                  coercion.
 -->
 
-Type: Runtime
+Type: End-of-Life
 
 Values other than `undefined`, `null`, integer numbers, and integer strings
 (e.g., `'1'`) are deprecated as value for the `code` parameter in
@@ -3220,7 +3235,7 @@ The [`--trace-atomics-wait`][] flag is deprecated.
 
 <!-- YAML
 changes:
-  - version: v18.10.0
+  - version: v19.0.0
     pr-url: https://github.com/nodejs/node/pull/44495
     description: Runtime deprecation.
   - version: v18.10.0
@@ -3280,17 +3295,73 @@ Node-API callbacks.
 
 <!-- YAML
 changes:
+  - version: v19.9.0
+    pr-url: https://github.com/nodejs/node/pull/47203
+    description: Added support for `--pending-deprecation`.
   - version:
-      - REPLACEME
+      - v19.0.0
+      - v18.13.0
     pr-url: https://github.com/nodejs/node/pull/44919
+    description: Documentation-only deprecation.
+-->
+
+Type: Documentation-only (supports [`--pending-deprecation`][])
+
+[`url.parse()`][] behavior is not standardized and prone to errors that
+have security implications. Use the [WHATWG URL API][] instead. CVEs are not
+issued for `url.parse()` vulnerabilities.
+
+### DEP0170: Invalid port when using `url.parse()`
+
+<!-- YAML
+changes:
+  - version:
+    - v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/45526
+    description: Runtime deprecation.
+  - version:
+      - v19.2.0
+      - v18.13.0
+    pr-url: https://github.com/nodejs/node/pull/45576
+    description: Documentation-only deprecation.
+-->
+
+Type: Runtime
+
+[`url.parse()`][] accepts URLs with ports that are not numbers. This behavior
+might result in host name spoofing with unexpected input. These URLs will throw
+an error in future versions of Node.js, as the [WHATWG URL API][] does already.
+
+### DEP0171: Setters for `http.IncomingMessage` headers and trailers
+
+<!-- YAML
+changes:
+  - version:
+      - v19.3.0
+      - v18.13.0
+    pr-url: https://github.com/nodejs/node/pull/45697
     description: Documentation-only deprecation.
 -->
 
 Type: Documentation-only
 
-[`url.parse()`][] behavior is not standardized and prone to errors that
-have security implications. Use the [WHATWG URL API][] instead. CVEs are not
-issued for `url.parse()` vulnerabilities.
+In a future version of Node.js, [`message.headers`][],
+[`message.headersDistinct`][], [`message.trailers`][], and
+[`message.trailersDistinct`][] will be read-only.
+
+### DEP0172: The `asyncResource` property of `AsyncResource` bound functions
+
+<!-- YAML
+changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/46432
+    description: Runtime-deprecation.
+-->
+
+Type: Runtime
+
+In a future version of Node.js, the `asyncResource` property will no longer
+be added when a function is bound to an `AsyncResource`.
 
 [NIST SP 800-38D]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
 [RFC 6066]: https://tools.ietf.org/html/rfc6066#section-3
@@ -3324,7 +3395,6 @@ issued for `url.parse()` vulnerabilities.
 [`console.error()`]: console.md#consoleerrordata-args
 [`console.log()`]: console.md#consolelogdata-args
 [`crypto.Certificate()` constructor]: crypto.md#legacy-api
-[`crypto.DEFAULT_ENCODING`]: crypto.md#cryptodefault_encoding
 [`crypto.createCipher()`]: crypto.md#cryptocreatecipheralgorithm-password-options
 [`crypto.createCipheriv()`]: crypto.md#cryptocreatecipherivalgorithm-key-iv-options
 [`crypto.createDecipher()`]: crypto.md#cryptocreatedecipheralgorithm-password-options
@@ -3341,7 +3411,7 @@ issued for `url.parse()` vulnerabilities.
 [`dnsPromises.lookup()`]: dns.md#dnspromiseslookuphostname-options
 [`domain`]: domain.md
 [`ecdh.setPublicKey()`]: crypto.md#ecdhsetpublickeypublickey-encoding
-[`emitter.listenerCount(eventName)`]: events.md#emitterlistenercounteventname
+[`emitter.listenerCount(eventName)`]: events.md#emitterlistenercounteventname-listener
 [`events.listenerCount(emitter, eventName)`]: events.md#eventslistenercountemitter-eventname
 [`fs.FileHandle`]: fs.md#class-filehandle
 [`fs.access()`]: fs.md#fsaccesspath-mode-callback
@@ -3368,7 +3438,11 @@ issued for `url.parse()` vulnerabilities.
 [`https.get()`]: https.md#httpsgetoptions-callback
 [`https.request()`]: https.md#httpsrequestoptions-callback
 [`message.connection`]: http.md#messageconnection
+[`message.headersDistinct`]: http.md#messageheadersdistinct
+[`message.headers`]: http.md#messageheaders
 [`message.socket`]: http.md#messagesocket
+[`message.trailersDistinct`]: http.md#messagetrailersdistinct
+[`message.trailers`]: http.md#messagetrailers
 [`module.createRequire()`]: module.md#modulecreaterequirefilename
 [`os.networkInterfaces()`]: os.md#osnetworkinterfaces
 [`os.tmpdir()`]: os.md#ostmpdir

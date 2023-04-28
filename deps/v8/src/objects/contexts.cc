@@ -203,6 +203,7 @@ Handle<Object> Context::Lookup(Handle<Context> context, Handle<String> name,
   Isolate* isolate = context->GetIsolate();
 
   bool follow_context_chain = (flags & FOLLOW_CONTEXT_CHAIN) != 0;
+  bool has_seen_debug_evaluate_context = false;
   *index = kNotFound;
   *attributes = ABSENT;
   *init_flag = kCreatedInitialized;
@@ -223,6 +224,7 @@ Handle<Object> Context::Lookup(Handle<Context> context, Handle<String> name,
              reinterpret_cast<void*>(context->ptr()));
       if (context->IsScriptContext()) PrintF(" (script context)");
       if (context->IsNativeContext()) PrintF(" (native context)");
+      if (context->IsDebugEvaluateContext()) PrintF(" (debug context)");
       PrintF("\n");
     }
 
@@ -274,7 +276,6 @@ Handle<Object> Context::Lookup(Handle<Context> context, Handle<String> name,
         // TODO(v8:5405): Replace this check with a DCHECK when resolution of
         // of synthetic variables does not go through this code path.
         if (ScopeInfo::VariableIsSynthetic(*name)) {
-          DCHECK(context->IsWithContext());
           maybe = Just(ABSENT);
         } else {
           LookupIterator it(isolate, object, name, object);
@@ -381,6 +382,8 @@ Handle<Object> Context::Lookup(Handle<Context> context, Handle<String> name,
         }
       }
     } else if (context->IsDebugEvaluateContext()) {
+      has_seen_debug_evaluate_context = true;
+
       // Check materialized locals.
       Object ext = context->get(EXTENSION_INDEX);
       if (ext.IsJSReceiver()) {
@@ -391,16 +394,6 @@ Handle<Object> Context::Lookup(Handle<Context> context, Handle<String> name,
           *attributes = NONE;
           return extension;
         }
-      }
-
-      // Check blocklist. Names that are listed, cannot be resolved further.
-      ScopeInfo scope_info = context->scope_info();
-      if (scope_info.HasLocalsBlockList() &&
-          scope_info.LocalsBlockList().Has(isolate, name)) {
-        if (v8_flags.trace_contexts) {
-          PrintF(" - name is blocklisted. Aborting.\n");
-        }
-        break;
       }
 
       // Check the original context, but do not follow its context chain.
@@ -417,6 +410,26 @@ Handle<Object> Context::Lookup(Handle<Context> context, Handle<String> name,
     // 3. Prepare to continue with the previous (next outermost) context.
     if (context->IsNativeContext()) break;
 
+    // In case we saw any DebugEvaluateContext, we'll need to check the block
+    // list before we can advance to properly "shadow" stack-allocated
+    // variables.
+    // Note that this implicitly skips the block list check for the
+    // "wrapped" context lookup for DebugEvaluateContexts. In that case
+    // `has_seen_debug_evaluate_context` will always be false.
+    if (has_seen_debug_evaluate_context &&
+        isolate->heap()->locals_block_list_cache().IsEphemeronHashTable()) {
+      Handle<ScopeInfo> scope_info = handle(context->scope_info(), isolate);
+      Object maybe_outer_block_list =
+          isolate->LocalsBlockListCacheGet(scope_info);
+      if (maybe_outer_block_list.IsStringSet() &&
+          StringSet::cast(maybe_outer_block_list).Has(isolate, name)) {
+        if (v8_flags.trace_contexts) {
+          PrintF(" - name is blocklisted. Aborting.\n");
+        }
+        break;
+      }
+    }
+
     context = Handle<Context>(context->previous(), isolate);
   } while (follow_context_chain);
 
@@ -426,11 +439,8 @@ Handle<Object> Context::Lookup(Handle<Context> context, Handle<String> name,
   return Handle<Object>::null();
 }
 
-void NativeContext::AddOptimizedCode(CodeT code) {
-  DCHECK(CodeKindCanDeoptimize(code.kind()));
-  DCHECK(code.next_code_link().IsUndefined());
-  code.set_next_code_link(OptimizedCodeListHead());
-  set(OPTIMIZED_CODE_LIST, code, UPDATE_WRITE_BARRIER, kReleaseStore);
+bool NativeContext::HasTemplateLiteralObject(JSArray array) {
+  return array.map() == js_array_template_literal_object_map();
 }
 
 Handle<Object> Context::ErrorMessageForCodeGenerationFromStrings() {
@@ -511,7 +521,7 @@ void Context::VerifyExtensionSlot(HeapObject extension) {
 void Context::set_extension(HeapObject object, WriteBarrierMode mode) {
   DCHECK(scope_info().HasContextExtensionSlot());
 #ifdef VERIFY_HEAP
-  VerifyExtensionSlot(object);
+  if (v8_flags.verify_heap) VerifyExtensionSlot(object);
 #endif
   set(EXTENSION_INDEX, object, mode);
 }

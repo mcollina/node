@@ -1,4 +1,3 @@
-// Flags: --experimental-wasi-unstable-preview1
 'use strict';
 
 const common = require('../common');
@@ -12,20 +11,20 @@ const bufferSource = fixtures.readSync('simple.wasm');
 (async () => {
   {
     // Verify that a WebAssembly.Instance is passed in.
-    const wasi = new WASI();
+    const wasi = new WASI({ version: 'preview1' });
 
     assert.throws(
       () => { wasi.initialize(); },
       {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /"instance" argument must be of type object/
-      }
+        message: /"instance" argument must be of type object/,
+      },
     );
   }
 
   {
     // Verify that the passed instance has an exports objects.
-    const wasi = new WASI({});
+    const wasi = new WASI({ version: 'preview1' });
     const wasm = await WebAssembly.compile(bufferSource);
     const instance = await WebAssembly.instantiate(wasm);
 
@@ -34,14 +33,14 @@ const bufferSource = fixtures.readSync('simple.wasm');
       () => { wasi.initialize(instance); },
       {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /"instance\.exports" property must be of type object/
-      }
+        message: /"instance\.exports" property must be of type object/,
+      },
     );
   }
 
   {
     // Verify that a _initialize() export was passed.
-    const wasi = new WASI({});
+    const wasi = new WASI({ version: 'preview1' });
     const wasm = await WebAssembly.compile(bufferSource);
     const instance = await WebAssembly.instantiate(wasm);
 
@@ -57,14 +56,14 @@ const bufferSource = fixtures.readSync('simple.wasm');
       () => { wasi.initialize(instance); },
       {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /"instance\.exports\._initialize" property must be of type function/
-      }
+        message: /"instance\.exports\._initialize" property must be of type function/,
+      },
     );
   }
 
   {
     // Verify that a _start export was not passed.
-    const wasi = new WASI({});
+    const wasi = new WASI({ version: 'preview1' });
     const wasm = await WebAssembly.compile(bufferSource);
     const instance = await WebAssembly.instantiate(wasm);
 
@@ -75,7 +74,7 @@ const bufferSource = fixtures.readSync('simple.wasm');
           _initialize() {},
           memory: new WebAssembly.Memory({ initial: 1 }),
         };
-      }
+      },
     });
     assert.throws(
       () => { wasi.initialize(instance); },
@@ -83,31 +82,31 @@ const bufferSource = fixtures.readSync('simple.wasm');
         code: 'ERR_INVALID_ARG_TYPE',
         message: 'The "instance.exports._start" property must be' +
           ' undefined. Received function _start',
-      }
+      },
     );
   }
 
   {
     // Verify that a memory export was passed.
-    const wasi = new WASI({});
+    const wasi = new WASI({ version: 'preview1' });
     const wasm = await WebAssembly.compile(bufferSource);
     const instance = await WebAssembly.instantiate(wasm);
 
     Object.defineProperty(instance, 'exports', {
-      get() { return { _initialize() {} }; }
+      get() { return { _initialize() {} }; },
     });
     assert.throws(
       () => { wasi.initialize(instance); },
       {
         code: 'ERR_INVALID_ARG_TYPE',
-        message: /"instance\.exports\.memory" property must be a WebAssembly\.Memory object/
-      }
+        message: /"instance\.exports\.memory" property must be a WebAssembly\.Memory object/,
+      },
     );
   }
 
   {
     // Verify that a WebAssembly.Instance from another VM context is accepted.
-    const wasi = new WASI({});
+    const wasi = new WASI({ version: 'preview1' });
     const instance = await vm.runInNewContext(`
       (async () => {
         const wasm = await WebAssembly.compile(bufferSource);
@@ -131,7 +130,7 @@ const bufferSource = fixtures.readSync('simple.wasm');
 
   {
     // Verify that initialize() can only be called once.
-    const wasi = new WASI({});
+    const wasi = new WASI({ version: 'preview1' });
     const wasm = await WebAssembly.compile(bufferSource);
     const instance = await WebAssembly.instantiate(wasm);
 
@@ -139,17 +138,17 @@ const bufferSource = fixtures.readSync('simple.wasm');
       get() {
         return {
           _initialize() {},
-          memory: new WebAssembly.Memory({ initial: 1 })
+          memory: new WebAssembly.Memory({ initial: 1 }),
         };
-      }
+      },
     });
     wasi.initialize(instance);
     assert.throws(
       () => { wasi.initialize(instance); },
       {
         code: 'ERR_WASI_ALREADY_STARTED',
-        message: /^WASI instance has already started$/
-      }
+        message: /^WASI instance has already started$/,
+      },
     );
   }
 })().then(common.mustCall());

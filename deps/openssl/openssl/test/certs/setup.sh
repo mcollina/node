@@ -10,7 +10,7 @@ DAYS=-1 ./mkcert.sh genroot "Root CA" root-key root-expired
 # cross root and root cross cert
 ./mkcert.sh genroot "Cross Root" cross-key cross-root
 ./mkcert.sh genca "Root CA" root-key root-cross-cert cross-key cross-root
-# trust variants: +serverAuth -serverAuth +clientAuth -clientAuth,
+# trust variants: +serverAuth -serverAuth +clientAuth -clientAuth
 openssl x509 -in root-cert.pem -trustout \
     -addtrust serverAuth -out root+serverAuth.pem
 openssl x509 -in root-cert.pem -trustout \
@@ -79,7 +79,7 @@ openssl x509 -in sroot-cert.pem -trustout \
 
 # Primary intermediate ca: ca-cert
 ./mkcert.sh genca "CA" ca-key ca-cert root-key root-cert
-# ca variants: CA:false, key2, DN2, issuer2, expired
+# ca variants: CA:false, no bc, key2, DN2, issuer2, expired
 ./mkcert.sh genee "CA" ca-key ca-nonca root-key root-cert
 ./mkcert.sh gen_nonbc_ca "CA" ca-key ca-nonbc root-key root-cert
 ./mkcert.sh genca "CA" ca-key2 ca-cert2 root-key root-cert
@@ -387,6 +387,17 @@ REQMASK=MASK:0x800 ./mkcert.sh req badalt7-key "O = Bad NC Test Certificate 7" \
     "DNS.1 = www.ok.good.com" "DNS.2 = bad.ok.good.com" \
     "email.1 = good@good.org" "email.2 = any@good.com" \
     "IP = 127.0.0.1" "IP = 192.168.0.1"
+
+# Certs for CVE-2022-4203 testcase
+
+NC="excluded;otherName:SRVName;UTF8STRING:foo@example.org" ./mkcert.sh genca \
+    "Test NC CA othername" nccaothername-key nccaothername-cert \
+    root-key root-cert
+
+./mkcert.sh req alt-email-key "O = NC email in othername Test Certificate" | \
+    ./mkcert.sh geneealt bad-othername-key bad-othername-cert \
+    nccaothername-key nccaothername-cert \
+    "otherName.1 = SRVName;UTF8STRING:foo@example.org"
 
 # RSA-PSS signatures
 # SHA1

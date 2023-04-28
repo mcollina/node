@@ -16,7 +16,6 @@
 #include "src/heap/base/active-system-pages.h"
 #include "src/heap/basic-memory-chunk.h"
 #include "src/heap/free-list.h"
-#include "src/heap/heap.h"
 #include "src/heap/linear-allocation-area.h"
 #include "src/heap/list.h"
 #include "src/heap/memory-chunk-layout.h"
@@ -37,9 +36,11 @@ class TestCodePageAllocatorScope;
 
 class AllocationObserver;
 class FreeList;
+class Heap;
 class Isolate;
 class LargeObjectSpace;
 class LargePage;
+class ObjectIterator;
 class Page;
 class PagedSpaceBase;
 class SemiSpace;
@@ -139,9 +140,9 @@ class V8_EXPORT_PRIVATE Space : public BaseSpace {
 
   virtual void RemoveAllocationObserver(AllocationObserver* observer);
 
-  virtual void PauseAllocationObservers();
+  virtual void PauseAllocationObservers() {}
 
-  virtual void ResumeAllocationObservers();
+  virtual void ResumeAllocationObservers() {}
 
   // Returns size of objects. Can differ from the allocated size
   // (e.g. see OldLargeObjectSpace).
@@ -153,6 +154,8 @@ class V8_EXPORT_PRIVATE Space : public BaseSpace {
   virtual int RoundSizeDownToObjectAlignment(int size) const {
     if (id_ == CODE_SPACE) {
       return RoundDown(size, kCodeAlignment);
+    } else if (V8_COMPRESS_POINTERS_8GB_BOOL) {
+      return RoundDown(size, kObjectAlignment8GbHeap);
     } else {
       return RoundDown(size, kTaggedSize);
     }
@@ -182,7 +185,9 @@ class V8_EXPORT_PRIVATE Space : public BaseSpace {
     return memory_chunk_list_.back();
   }
 
-  heap::List<MemoryChunk>& memory_chunk_list() { return memory_chunk_list_; }
+  virtual heap::List<MemoryChunk>& memory_chunk_list() {
+    return memory_chunk_list_;
+  }
 
   virtual Page* InitializePage(MemoryChunk* chunk) { UNREACHABLE(); }
 
@@ -299,7 +304,7 @@ class Page : public MemoryChunk {
     return categories_[type];
   }
 
-  size_t ShrinkToHighWaterMark();
+  V8_EXPORT_PRIVATE size_t ShrinkToHighWaterMark();
 
   V8_EXPORT_PRIVATE void CreateBlackArea(Address start, Address end);
   V8_EXPORT_PRIVATE void CreateBlackAreaBackground(Address start, Address end);
@@ -310,7 +315,7 @@ class Page : public MemoryChunk {
   void AllocateFreeListCategories();
   void ReleaseFreeListCategories();
 
-  ActiveSystemPages* active_system_pages() { return &active_system_pages_; }
+  ActiveSystemPages* active_system_pages() { return active_system_pages_; }
 
   template <RememberedSetType remembered_set>
   void ClearTypedSlotsInFreeMemory(const TypedSlotSet::FreeRangesMap& ranges) {
@@ -346,7 +351,11 @@ static_assert(sizeof(Page) <= MemoryChunk::kHeaderSize);
 
 class V8_EXPORT_PRIVATE ObjectIterator : public Malloced {
  public:
-  virtual ~ObjectIterator() = default;
+  // Note: The destructor can not be marked as `= default` as this causes
+  // the compiler on C++20 to define it as `constexpr` resulting in the
+  // compiler producing warnings about undefined inlines for Next()
+  // on classes inheriting from it.
+  virtual ~ObjectIterator() {}
   virtual HeapObject Next() = 0;
 };
 
@@ -559,12 +568,7 @@ class SpaceWithLinearArea : public Space {
   // allow proper observation based on existing observers. min_size specifies
   // the minimum size that the limited area should have.
   Address ComputeLimit(Address start, Address end, size_t min_size) const;
-  V8_EXPORT_PRIVATE virtual void UpdateInlineAllocationLimit(
-      size_t min_size) = 0;
-
-  void DisableInlineAllocation();
-  void EnableInlineAllocation();
-  bool IsInlineAllocationEnabled() const { return allocation_info_.enabled(); }
+  V8_EXPORT_PRIVATE virtual void UpdateInlineAllocationLimit() = 0;
 
   void PrintAllocationsOrigins() const;
 
@@ -640,6 +644,19 @@ class SpaceWithLinearArea : public Space {
 
   size_t allocations_origins_[static_cast<int>(
       AllocationOrigin::kNumberOfAllocationOrigins)] = {0};
+};
+
+class V8_EXPORT_PRIVATE SpaceIterator : public Malloced {
+ public:
+  explicit SpaceIterator(Heap* heap);
+  virtual ~SpaceIterator();
+
+  bool HasNext();
+  Space* Next();
+
+ private:
+  Heap* heap_;
+  int current_space_;  // from enum AllocationSpace.
 };
 
 // Iterates over all memory chunks in the heap (across all spaces).

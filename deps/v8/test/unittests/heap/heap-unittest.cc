@@ -10,8 +10,10 @@
 
 #include "include/v8-isolate.h"
 #include "include/v8-object.h"
+#include "src/flags/flags.h"
 #include "src/handles/handles-inl.h"
 #include "src/heap/gc-tracer.h"
+#include "src/heap/marking-state-inl.h"
 #include "src/heap/memory-chunk.h"
 #include "src/heap/remembered-set.h"
 #include "src/heap/safepoint.h"
@@ -149,18 +151,17 @@ TEST_F(HeapTest, HeapLayout) {
   EXPECT_TRUE(IsAligned(cage_base, size_t{4} * GB));
 
   Address code_cage_base = i_isolate()->code_cage_base();
-  EXPECT_TRUE(IsAligned(code_cage_base, size_t{4} * GB));
-
-#ifdef V8_COMPRESS_POINTERS_IN_ISOLATE_CAGE
-  Address isolate_root = i_isolate()->isolate_root();
-  EXPECT_EQ(cage_base, isolate_root);
-#endif
+  if (V8_EXTERNAL_CODE_SPACE_BOOL) {
+    EXPECT_TRUE(IsAligned(code_cage_base, kMinExpectedOSPageSize));
+  } else {
+    EXPECT_TRUE(IsAligned(code_cage_base, size_t{4} * GB));
+  }
 
   // Check that all memory chunks belong this region.
   base::AddressRegion heap_reservation(cage_base, size_t{4} * GB);
   base::AddressRegion code_reservation(code_cage_base, size_t{4} * GB);
 
-  SafepointScope scope(i_isolate()->heap());
+  IsolateSafepointScope scope(i_isolate()->heap());
   OldGenerationMemoryChunkIterator iter(i_isolate()->heap());
   for (;;) {
     MemoryChunk* chunk = iter.next();
@@ -178,6 +179,39 @@ TEST_F(HeapTest, HeapLayout) {
   }
 }
 #endif  // V8_COMPRESS_POINTERS
+
+namespace {
+void ShrinkNewSpace(NewSpace* new_space) {
+  if (!v8_flags.minor_mc) {
+    SemiSpaceNewSpace::From(new_space)->Shrink();
+    return;
+  }
+  // MinorMC shrinks the space as part of sweeping.
+  PagedNewSpace* paged_new_space = PagedNewSpace::From(new_space);
+  Heap* heap = paged_new_space->heap();
+  heap->EnsureSweepingCompleted(Heap::SweepingForcedFinalizationMode::kV8Only);
+  GCTracer* tracer = heap->tracer();
+  tracer->StartObservablePause();
+  tracer->StartCycle(GarbageCollector::MARK_COMPACTOR,
+                     GarbageCollectionReason::kTesting, "heap unittest",
+                     GCTracer::MarkingType::kAtomic);
+  tracer->StartAtomicPause();
+  paged_new_space->StartShrinking();
+  for (Page* page = paged_new_space->first_page();
+       page != paged_new_space->last_page() &&
+       (paged_new_space->ShouldReleaseEmptyPage());) {
+    Page* current_page = page;
+    page = page->next_page();
+    if (current_page->allocated_bytes() == 0) {
+      paged_new_space->ReleasePage(current_page);
+    }
+  }
+  paged_new_space->FinishShrinking();
+  tracer->StopAtomicPause();
+  tracer->StopObservablePause();
+  tracer->NotifyFullSweepingCompleted();
+}
+}  // namespace
 
 TEST_F(HeapTest, GrowAndShrinkNewSpace) {
   if (v8_flags.single_generation) return;
@@ -197,7 +231,7 @@ TEST_F(HeapTest, GrowAndShrinkNewSpace) {
   // Make sure we're in a consistent state to start out.
   CollectAllGarbage();
   CollectAllGarbage();
-  new_space->Shrink();
+  ShrinkNewSpace(new_space);
 
   // Explicitly growing should double the space capacity.
   size_t old_capacity, new_capacity;
@@ -216,7 +250,7 @@ TEST_F(HeapTest, GrowAndShrinkNewSpace) {
 
   // Explicitly shrinking should not affect space capacity.
   old_capacity = new_space->TotalCapacity();
-  new_space->Shrink();
+  ShrinkNewSpace(new_space);
   new_capacity = new_space->TotalCapacity();
   CHECK_EQ(old_capacity, new_capacity);
 
@@ -226,7 +260,7 @@ TEST_F(HeapTest, GrowAndShrinkNewSpace) {
 
   // Explicitly shrinking should halve the space capacity.
   old_capacity = new_space->TotalCapacity();
-  new_space->Shrink();
+  ShrinkNewSpace(new_space);
   new_capacity = new_space->TotalCapacity();
   if (v8_flags.minor_mc) {
     // Shrinking may not be able to remove any pages if all contain live
@@ -238,9 +272,9 @@ TEST_F(HeapTest, GrowAndShrinkNewSpace) {
 
   // Consecutive shrinking should not affect space capacity.
   old_capacity = new_space->TotalCapacity();
-  new_space->Shrink();
-  new_space->Shrink();
-  new_space->Shrink();
+  ShrinkNewSpace(new_space);
+  ShrinkNewSpace(new_space);
+  ShrinkNewSpace(new_space);
   new_capacity = new_space->TotalCapacity();
   CHECK_EQ(old_capacity, new_capacity);
 }
@@ -340,9 +374,10 @@ TEST_F(HeapTest, RememberedSet_InsertOnPromotingObjectToOld) {
     CHECK(!new_space->IsAtMaximumCapacity());
     // Fill current pages to force MinorMC to promote them.
     SimulateFullSpace(new_space, &handles);
-    SafepointScope scope(heap);
+    IsolateSafepointScope scope(heap);
     // New empty pages should remain in new space.
     new_space->Grow();
+    CHECK(new_space->EnsureCurrentCapacity());
   } else {
     CollectGarbage(i::NEW_SPACE);
   }
@@ -358,6 +393,7 @@ TEST_F(HeapTest, RememberedSet_InsertOnPromotingObjectToOld) {
   // Promote 'arr' into old, its element is still in new, the old to new
   // refs are inserted into the remembered sets during GC.
   CollectGarbage(i::NEW_SPACE);
+  heap->EnsureSweepingCompleted(Heap::SweepingForcedFinalizationMode::kV8Only);
 
   CHECK(heap->InOldSpace(*arr));
   CHECK(heap->InYoungGeneration(arr->get(0)));
@@ -389,18 +425,16 @@ TEST_F(HeapTest, Regress978156) {
   // 5. Start incremental marking.
   i::IncrementalMarking* marking = heap->incremental_marking();
   if (marking->IsStopped()) {
-    SafepointScope scope(heap);
+    IsolateSafepointScope scope(heap);
     heap->tracer()->StartCycle(
         GarbageCollector::MARK_COMPACTOR, GarbageCollectionReason::kTesting,
         "collector cctest", GCTracer::MarkingType::kIncremental);
     marking->Start(GarbageCollector::MARK_COMPACTOR,
                    i::GarbageCollectionReason::kTesting);
   }
-  MarkingState* marking_state = marking->marking_state();
   // 6. Mark the filler black to access its two markbits. This triggers
   // an out-of-bounds access of the marking bitmap in a bad case.
-  marking_state->WhiteToGrey(filler);
-  marking_state->GreyToBlack(filler);
+  heap->marking_state()->TryMarkAndAccountLiveBytes(filler);
 }
 
 }  // namespace internal

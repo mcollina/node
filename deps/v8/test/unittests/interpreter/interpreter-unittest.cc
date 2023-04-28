@@ -377,7 +377,10 @@ TEST_F(InterpreterTest, InterpreterBinaryOpsBigInt) {
         if (tester.HasFeedbackMetadata()) {
           MaybeObject feedback = callable.vector().Get(slot);
           CHECK(feedback->IsSmi());
-          CHECK_EQ(BinaryOperationFeedback::kBigInt, feedback->ToSmi().value());
+          // TODO(panq): Create a standalone unit test for kBigInt64.
+          CHECK(BinaryOperationFeedback::kBigInt64 ==
+                    feedback->ToSmi().value() ||
+                BinaryOperationFeedback::kBigInt == feedback->ToSmi().value());
         }
       }
     }
@@ -1838,8 +1841,10 @@ TEST_F(InterpreterTest, InterpreterBigIntComparisons) {
         if (tester.HasFeedbackMetadata()) {
           MaybeObject feedback = callable.vector().Get(slot);
           CHECK(feedback->IsSmi());
-          CHECK_EQ(CompareOperationFeedback::kBigInt,
-                   feedback->ToSmi().value());
+          // TODO(panq): Create a standalone unit test for kBigInt64.
+          CHECK(CompareOperationFeedback::kBigInt64 ==
+                    feedback->ToSmi().value() ||
+                CompareOperationFeedback::kBigInt == feedback->ToSmi().value());
         }
       }
     }
@@ -4739,9 +4744,9 @@ TEST_F(InterpreterTest, InterpreterGenerators) {
 #ifndef V8_TARGET_ARCH_ARM
 TEST_F(InterpreterTest, InterpreterWithNativeStack) {
   // "Always sparkplug" messes with this test.
-  if (FLAG_always_sparkplug) return;
+  if (v8_flags.always_sparkplug) return;
 
-  i::FLAG_interpreted_frames_native_stack = true;
+  i::v8_flags.interpreted_frames_native_stack = true;
 
   const char* source_text =
       "function testInterpreterWithNativeStack(a,b) { return a + b };";
@@ -4755,11 +4760,11 @@ TEST_F(InterpreterTest, InterpreterWithNativeStack) {
   i::Handle<i::JSFunction> f = i::Handle<i::JSFunction>::cast(o);
 
   CHECK(f->shared().HasBytecodeArray());
-  i::CodeT code = f->shared().GetCode();
-  i::Handle<i::CodeT> interpreter_entry_trampoline =
+  i::Code code = f->shared().GetCode(i_isolate());
+  i::Handle<i::Code> interpreter_entry_trampoline =
       BUILTIN_CODE(i_isolate(), InterpreterEntryTrampoline);
 
-  CHECK(code.IsCodeT());
+  CHECK(code.IsCode());
   CHECK(code.is_interpreter_trampoline_builtin());
   CHECK_NE(code.address(), interpreter_entry_trampoline->address());
 }
@@ -4769,32 +4774,32 @@ TEST_F(InterpreterTest, InterpreterGetBytecodeHandler) {
   Interpreter* interpreter = i_isolate()->interpreter();
 
   // Test that single-width bytecode handlers deserializer correctly.
-  CodeT wide_handler =
+  Code wide_handler =
       interpreter->GetBytecodeHandler(Bytecode::kWide, OperandScale::kSingle);
 
   CHECK_EQ(wide_handler.builtin_id(), Builtin::kWideHandler);
 
-  CodeT add_handler =
+  Code add_handler =
       interpreter->GetBytecodeHandler(Bytecode::kAdd, OperandScale::kSingle);
 
   CHECK_EQ(add_handler.builtin_id(), Builtin::kAddHandler);
 
   // Test that double-width bytecode handlers deserializer correctly, including
   // an illegal bytecode handler since there is no Wide.Wide handler.
-  CodeT wide_wide_handler =
+  Code wide_wide_handler =
       interpreter->GetBytecodeHandler(Bytecode::kWide, OperandScale::kDouble);
 
   CHECK_EQ(wide_wide_handler.builtin_id(), Builtin::kIllegalHandler);
 
-  CodeT add_wide_handler =
+  Code add_wide_handler =
       interpreter->GetBytecodeHandler(Bytecode::kAdd, OperandScale::kDouble);
 
   CHECK_EQ(add_wide_handler.builtin_id(), Builtin::kAddWideHandler);
 }
 
 TEST_F(InterpreterTest, InterpreterCollectSourcePositions) {
-  FLAG_enable_lazy_source_positions = true;
-  FLAG_stress_lazy_source_positions = false;
+  v8_flags.enable_lazy_source_positions = true;
+  v8_flags.stress_lazy_source_positions = false;
 
   const char* source =
       "(function () {\n"
@@ -4817,8 +4822,8 @@ TEST_F(InterpreterTest, InterpreterCollectSourcePositions) {
 }
 
 TEST_F(InterpreterTest, InterpreterCollectSourcePositions_StackOverflow) {
-  FLAG_enable_lazy_source_positions = true;
-  FLAG_stress_lazy_source_positions = false;
+  v8_flags.enable_lazy_source_positions = true;
+  v8_flags.stress_lazy_source_positions = false;
 
   const char* source =
       "(function () {\n"
@@ -4852,8 +4857,8 @@ TEST_F(InterpreterTest, InterpreterCollectSourcePositions_StackOverflow) {
 }
 
 TEST_F(InterpreterTest, InterpreterCollectSourcePositions_ThrowFrom1stFrame) {
-  FLAG_enable_lazy_source_positions = true;
-  FLAG_stress_lazy_source_positions = false;
+  v8_flags.enable_lazy_source_positions = true;
+  v8_flags.stress_lazy_source_positions = false;
 
   const char* source =
       R"javascript(
@@ -4886,8 +4891,8 @@ TEST_F(InterpreterTest, InterpreterCollectSourcePositions_ThrowFrom1stFrame) {
 }
 
 TEST_F(InterpreterTest, InterpreterCollectSourcePositions_ThrowFrom2ndFrame) {
-  FLAG_enable_lazy_source_positions = true;
-  FLAG_stress_lazy_source_positions = false;
+  v8_flags.enable_lazy_source_positions = true;
+  v8_flags.stress_lazy_source_positions = false;
 
   const char* source =
       R"javascript(
@@ -4941,8 +4946,8 @@ void CheckStringEqual(const char* expected_ptr, Handle<Object> actual_handle) {
 }  // namespace
 
 TEST_F(InterpreterTest, InterpreterCollectSourcePositions_GenerateStackTrace) {
-  FLAG_enable_lazy_source_positions = true;
-  FLAG_stress_lazy_source_positions = false;
+  v8_flags.enable_lazy_source_positions = true;
+  v8_flags.stress_lazy_source_positions = false;
 
   const char* source =
       R"javascript(
@@ -4979,15 +4984,15 @@ TEST_F(InterpreterTest, InterpreterCollectSourcePositions_GenerateStackTrace) {
 
 TEST_F(InterpreterTest, InterpreterLookupNameOfBytecodeHandler) {
   Interpreter* interpreter = i_isolate()->interpreter();
-  CodeT ldaLookupSlot = interpreter->GetBytecodeHandler(
-      Bytecode::kLdaLookupSlot, OperandScale::kSingle);
+  Code ldaLookupSlot = interpreter->GetBytecodeHandler(Bytecode::kLdaLookupSlot,
+                                                       OperandScale::kSingle);
   CheckStringEqual("LdaLookupSlotHandler",
                    Builtins::name(ldaLookupSlot.builtin_id()));
-  CodeT wideLdaLookupSlot = interpreter->GetBytecodeHandler(
+  Code wideLdaLookupSlot = interpreter->GetBytecodeHandler(
       Bytecode::kLdaLookupSlot, OperandScale::kDouble);
   CheckStringEqual("LdaLookupSlotWideHandler",
                    Builtins::name(wideLdaLookupSlot.builtin_id()));
-  CodeT extraWideLdaLookupSlot = interpreter->GetBytecodeHandler(
+  Code extraWideLdaLookupSlot = interpreter->GetBytecodeHandler(
       Bytecode::kLdaLookupSlot, OperandScale::kQuadruple);
   CheckStringEqual("LdaLookupSlotExtraWideHandler",
                    Builtins::name(extraWideLdaLookupSlot.builtin_id()));

@@ -1923,7 +1923,6 @@ static int setup_client_ctx(OSSL_CMP_CTX *ctx, ENGINE *engine)
         if ((info = OPENSSL_zalloc(sizeof(*info))) == NULL)
             goto err;
         (void)OSSL_CMP_CTX_set_http_cb_arg(ctx, info);
-        /* info will be freed along with CMP ctx */
         info->server = opt_server;
         info->port = server_port;
         /* workaround for callback design flaw, see #17088: */
@@ -2690,8 +2689,8 @@ static int cmp_server(OSSL_CMP_CTX *srv_cmp_ctx) {
             (void)OSSL_CMP_CTX_set1_senderNonce(srv_cmp_ctx, NULL);
         }
         if (!ret || !keep_alive
-            || OSSL_CMP_CTX_get_status(srv_cmp_ctx) == -1
-             /* transaction closed by OSSL_CMP_CTX_server_perform() */) {
+            || OSSL_CMP_CTX_get_status(srv_cmp_ctx) != OSSL_CMP_PKISTATUS_trans
+            /* transaction closed by OSSL_CMP_CTX_server_perform() */) {
             BIO_free_all(cbio);
             cbio = NULL;
         }
@@ -2702,6 +2701,35 @@ static int cmp_server(OSSL_CMP_CTX *srv_cmp_ctx) {
     return ret;
 }
 #endif
+
+static void print_status(void)
+{
+    /* print PKIStatusInfo */
+    int status = OSSL_CMP_CTX_get_status(cmp_ctx);
+    char *buf = app_malloc(OSSL_CMP_PKISI_BUFLEN, "PKIStatusInfo buf");
+    const char *string =
+        OSSL_CMP_CTX_snprint_PKIStatus(cmp_ctx, buf, OSSL_CMP_PKISI_BUFLEN);
+    const char *from = "", *server = "";
+
+#ifndef OPENSSL_NO_SOCK
+    if (opt_server != NULL) {
+        from = " from ";
+        server = opt_server;
+    }
+#endif
+    CMP_print(bio_err,
+              status == OSSL_CMP_PKISTATUS_accepted
+              ? OSSL_CMP_LOG_INFO :
+              status == OSSL_CMP_PKISTATUS_rejection
+              || status == OSSL_CMP_PKISTATUS_waiting
+              ? OSSL_CMP_LOG_ERR : OSSL_CMP_LOG_WARNING,
+              status == OSSL_CMP_PKISTATUS_accepted ? "info" :
+              status == OSSL_CMP_PKISTATUS_rejection ? "server error" :
+              status == OSSL_CMP_PKISTATUS_waiting ? "internal error"
+              : "warning", "received%s%s %s", from, server,
+              string != NULL ? string : "<unknown PKIStatus>");
+    OPENSSL_free(buf);
+}
 
 int cmp_main(int argc, char **argv)
 {
@@ -2925,39 +2953,10 @@ int cmp_main(int argc, char **argv)
         default:
             break;
         }
-        if (OSSL_CMP_CTX_get_status(cmp_ctx) < 0)
+        if (OSSL_CMP_CTX_get_status(cmp_ctx) < OSSL_CMP_PKISTATUS_accepted)
             goto err; /* we got no response, maybe even did not send request */
 
-        {
-            /* print PKIStatusInfo */
-            int status = OSSL_CMP_CTX_get_status(cmp_ctx);
-            char *buf = app_malloc(OSSL_CMP_PKISI_BUFLEN, "PKIStatusInfo buf");
-            const char *string =
-                OSSL_CMP_CTX_snprint_PKIStatus(cmp_ctx, buf,
-                                               OSSL_CMP_PKISI_BUFLEN);
-            const char *from = "", *server = "";
-
-#ifndef OPENSSL_NO_SOCK
-            if (opt_server != NULL) {
-                from = " from ";
-                server = opt_server;
-            }
-#endif
-            CMP_print(bio_err,
-                      status == OSSL_CMP_PKISTATUS_accepted
-                      ? OSSL_CMP_LOG_INFO :
-                      status == OSSL_CMP_PKISTATUS_rejection
-                      || status == OSSL_CMP_PKISTATUS_waiting
-                      ? OSSL_CMP_LOG_ERR : OSSL_CMP_LOG_WARNING,
-                      status == OSSL_CMP_PKISTATUS_accepted ? "info" :
-                      status == OSSL_CMP_PKISTATUS_rejection ? "server error" :
-                      status == OSSL_CMP_PKISTATUS_waiting ? "internal error"
-                                                           : "warning",
-                      "received%s%s %s", from, server,
-                      string != NULL ? string : "<unknown PKIStatus>");
-            OPENSSL_free(buf);
-        }
-
+        print_status();
         if (save_free_certs(cmp_ctx, OSSL_CMP_CTX_get1_extraCertsIn(cmp_ctx),
                             opt_extracertsout, "extra") < 0)
             ret = 0;
@@ -3001,12 +3000,19 @@ int cmp_main(int argc, char **argv)
     if (ret != 1)
         OSSL_CMP_CTX_print_errors(cmp_ctx);
 
-    ossl_cmp_mock_srv_free(OSSL_CMP_CTX_get_transfer_cb_arg(cmp_ctx));
+    if (cmp_ctx != NULL) {
 #ifndef OPENSSL_NO_SOCK
-    APP_HTTP_TLS_INFO_free(OSSL_CMP_CTX_get_http_cb_arg(cmp_ctx));
+        APP_HTTP_TLS_INFO *info = OSSL_CMP_CTX_get_http_cb_arg(cmp_ctx);
+
 #endif
-    X509_STORE_free(OSSL_CMP_CTX_get_certConf_cb_arg(cmp_ctx));
-    OSSL_CMP_CTX_free(cmp_ctx);
+        ossl_cmp_mock_srv_free(OSSL_CMP_CTX_get_transfer_cb_arg(cmp_ctx));
+        X509_STORE_free(OSSL_CMP_CTX_get_certConf_cb_arg(cmp_ctx));
+        /* cannot free info already here, as it may be used indirectly by: */
+        OSSL_CMP_CTX_free(cmp_ctx);
+#ifndef OPENSSL_NO_SOCK
+        APP_HTTP_TLS_INFO_free(info);
+#endif
+    }
     X509_VERIFY_PARAM_free(vpm);
     release_engine(engine);
 

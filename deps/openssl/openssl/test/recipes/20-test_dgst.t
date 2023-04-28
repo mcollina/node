@@ -17,7 +17,7 @@ use OpenSSL::Test::Utils;
 
 setup("test_dgst");
 
-plan tests => 10;
+plan tests => 13;
 
 sub tsignverify {
     my $testtext = shift;
@@ -51,6 +51,43 @@ sub tsignverify {
        $testtext.": Expect failure verifying mismatching data");
 }
 
+sub tsignverify_sha512 {
+    my $testtext = shift;
+    my $privkey = shift;
+    my $pubkey = shift;
+
+    my $data_to_sign = srctop_file('test', 'data.bin');
+    my $other_data = srctop_file('test', 'data2.bin');
+
+    my $sigfile = basename($privkey, '.pem') . '.sig';
+    plan tests => 5;
+
+    ok(run(app(['openssl', 'sha512', '-sign', $privkey,
+                '-out', $sigfile,
+                $data_to_sign])),
+       $testtext.": Generating signature using sha512 command");
+
+    ok(run(app(['openssl', 'sha512', '-verify', $pubkey,
+                '-signature', $sigfile,
+                $data_to_sign])),
+       $testtext.": Verify signature with public key using sha512 command");
+
+    ok(run(app(['openssl', 'dgst', '-sha512', '-prverify', $privkey,
+                '-signature', $sigfile,
+                $data_to_sign])),
+       $testtext.": Verify signature with private key");
+
+    ok(run(app(['openssl', 'dgst', '-sha512', '-verify', $pubkey,
+                '-signature', $sigfile,
+                $data_to_sign])),
+       $testtext.": Verify signature with public key");
+
+    ok(!run(app(['openssl', 'dgst', '-sha512', '-verify', $pubkey,
+                 '-signature', $sigfile,
+                 $other_data])),
+       $testtext.": Expect failure verifying mismatching data");
+}
+
 SKIP: {
     skip "RSA is not supported by this OpenSSL build", 1
         if disabled("rsa");
@@ -59,6 +96,12 @@ SKIP: {
         tsignverify("RSA",
                     srctop_file("test","testrsa.pem"),
                     srctop_file("test","testrsapub.pem"));
+    };
+
+    subtest "RSA signature generation and verification with `sha512` CLI" => sub {
+        tsignverify_sha512("RSA",
+                           srctop_file("test","testrsa2048.pem"),
+                           srctop_file("test","testrsa2048pub.pem"));
     };
 }
 
@@ -178,3 +221,29 @@ subtest "Custom length XOF digest generation with `dgst` CLI" => sub {
     ok($xofdata[1] =~ $expected,
        "XOF: Check second digest value is consistent with the first ($xofdata[1]) vs ($expected)");
 };
+
+subtest "SHAKE digest generation with no xoflen set `dgst` CLI" => sub {
+    plan tests => 1;
+
+    my $testdata = srctop_file('test', 'data.bin');
+    my @xofdata = run(app(['openssl', 'dgst', '-shake128', $testdata], stderr => "outerr.txt"), capture => 1);
+    chomp(@xofdata);
+    my $expected = qr/SHAKE-128\(\Q$testdata\E\)= bb565dac72640109e1c926ef441d3fa6/;
+    ok($xofdata[0] =~ $expected, "Check short digest is output");
+};
+
+SKIP: {
+    skip "ECDSA is not supported by this OpenSSL build", 1
+        if disabled("ec");
+
+    subtest "signing with xoflen is not supported `dgst` CLI" => sub {
+        plan tests => 1;
+        my $data_to_sign = srctop_file('test', 'data.bin');
+
+        ok(!run(app(['openssl', 'dgst', '-shake256', '-xoflen', '64',
+                     '-sign', srctop_file("test","testec-p256.pem"),
+                     '-out', 'test.sig',
+                     srctop_file('test', 'data.bin')])),
+                     "Generating signature with xoflen should fail");
+    }
+}

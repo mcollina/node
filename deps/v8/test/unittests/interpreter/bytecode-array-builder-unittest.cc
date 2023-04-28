@@ -151,7 +151,8 @@ TEST_F(BytecodeArrayBuilderTest, AllBytecodesGenerated) {
       .SetKeyedProperty(reg, reg, strict_keyed_store_slot.ToInt(),
                         LanguageMode::kStrict)
       .DefineNamedOwnProperty(reg, name, define_named_own_slot.ToInt())
-      .DefineKeyedOwnProperty(reg, reg, define_named_own_slot.ToInt())
+      .DefineKeyedOwnProperty(reg, reg, DefineKeyedOwnPropertyFlag::kNoFlags,
+                              define_named_own_slot.ToInt())
       .StoreInArrayLiteral(reg, reg, store_array_element_slot.ToInt());
 
   // Emit Iterator-protocol operations
@@ -484,12 +485,9 @@ TEST_F(BytecodeArrayBuilderTest, AllBytecodesGenerated) {
   // Insert entry for illegal bytecode as this is never willingly emitted.
   scorecard[Bytecodes::ToByte(Bytecode::kIllegal)] = 1;
 
-  // Bytecode for CollectTypeProfile is only emitted when
-  // Type Information for DevTools is turned on.
-  scorecard[Bytecodes::ToByte(Bytecode::kCollectTypeProfile)] = 1;
-
   // This bytecode is too inconvenient to test manually.
-  scorecard[Bytecodes::ToByte(Bytecode::kFindNonDefaultConstructor)] = 1;
+  scorecard[Bytecodes::ToByte(
+      Bytecode::kFindNonDefaultConstructorOrConstruct)] = 1;
 
   // Check return occurs at the end and only once in the BytecodeArray.
   CHECK_EQ(final_bytecode, Bytecode::kReturn);

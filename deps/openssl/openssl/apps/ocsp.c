@@ -135,7 +135,7 @@ const OPTIONS ocsp_options[] = {
     {"no_certs", OPT_NO_CERTS, '-',
      "Don't include any certificates in signed request"},
     {"badsig", OPT_BADSIG, '-',
-        "Corrupt last byte of loaded OSCP response signature (for test)"},
+        "Corrupt last byte of loaded OCSP response signature (for test)"},
     {"CA", OPT_CA, '<', "CA certificate"},
     {"nmin", OPT_NMIN, 'p', "Number of minutes before next update"},
     {"nrequest", OPT_REQUEST, 'p',
@@ -724,6 +724,8 @@ redo_accept:
         make_ocsp_response(bio_err, &resp, req, rdb, rca_cert, rsigner, rkey,
                            rsign_md, rsign_sigopts, rother, rflags, nmin, ndays,
                            badsig, resp_certid_md);
+        if (resp == NULL)
+            goto end;
         if (cbio != NULL)
             send_ocsp_response(cbio, resp);
     } else if (host != NULL) {

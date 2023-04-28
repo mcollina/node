@@ -8,7 +8,7 @@ if (!common.hasCrypto)
 
 const assert = require('assert');
 const crypto = require('crypto');
-const { subtle } = crypto.webcrypto;
+const { subtle } = globalThis.crypto;
 
 const keyData = {
   'Ed25519': {
@@ -260,6 +260,38 @@ async function testImportJwk({ name, publicUsages, privateUsages }, extractable)
       });
   }
 
+  {
+    const invalidUse = name.startsWith('X') ? 'sig' : 'enc';
+    await assert.rejects(
+      subtle.importKey(
+        'jwk',
+        { ...jwk, use: invalidUse },
+        { name },
+        extractable,
+        privateUsages),
+      { message: 'Invalid JWK "use" Parameter' });
+  }
+
+  if (name.startsWith('Ed')) {
+    await assert.rejects(
+      subtle.importKey(
+        'jwk',
+        { kty: jwk.kty, x: jwk.x, crv: jwk.crv, alg: 'foo' },
+        { name },
+        extractable,
+        publicUsages),
+      { message: 'JWK "alg" does not match the requested algorithm' });
+
+    await assert.rejects(
+      subtle.importKey(
+        'jwk',
+        { ...jwk, alg: 'foo' },
+        { name },
+        extractable,
+        privateUsages),
+      { message: 'JWK "alg" does not match the requested algorithm' });
+  }
+
   for (const crv of [undefined, name === 'Ed25519' ? 'Ed448' : 'Ed25519']) {
     await assert.rejects(
       subtle.importKey(
@@ -268,16 +300,16 @@ async function testImportJwk({ name, publicUsages, privateUsages }, extractable)
         { name },
         extractable,
         publicUsages),
-      { message: /Subtype mismatch/ });
+      { message: 'JWK "crv" Parameter and algorithm name mismatch' });
 
     await assert.rejects(
       subtle.importKey(
         'jwk',
-        { kty: jwk.kty, d: jwk.d, x: jwk.x, y: jwk.y, crv },
+        { ...jwk, crv },
         { name },
         extractable,
         publicUsages),
-      { message: /Subtype mismatch/ });
+      { message: 'JWK "crv" Parameter and algorithm name mismatch' });
   }
 }
 
@@ -315,19 +347,19 @@ async function testImportRaw({ name, publicUsages }) {
   const rsaPrivate = crypto.createPrivateKey(
     fixtures.readKey('rsa_private_2048.pem'));
 
-  for (const [name, [publicUsage, privateUsage]] of Object.entries({
-    'Ed25519': ['verify', 'sign'],
-    'X448': ['deriveBits', 'deriveBits'],
-  })) {
+  for (const [name, publicUsages, privateUsages] of [
+    ['Ed25519', ['verify'], ['sign']],
+    ['X448', [], ['deriveBits']],
+  ]) {
     assert.rejects(subtle.importKey(
       'spki',
       rsaPublic.export({ format: 'der', type: 'spki' }),
       { name },
-      true, [publicUsage]), { message: /Invalid key type/ });
+      true, publicUsages), { message: /Invalid key type/ });
     assert.rejects(subtle.importKey(
       'pkcs8',
       rsaPrivate.export({ format: 'der', type: 'pkcs8' }),
       { name },
-      true, [privateUsage]), { message: /Invalid key type/ });
+      true, privateUsages), { message: /Invalid key type/ });
   }
 }

@@ -62,6 +62,8 @@ more control is required. The current plan is for the following APIs:
   Fetch-based API. As this gets worked out we will discuss which
   APIs to expose in the Node.js API surface.
 
+For info see [maintaining undici][].
+
 ### Server APIs
 
 For the server APIs we do not yet have a clear path, other than wanting
@@ -79,7 +81,7 @@ repository. Updates are pulled into Node.js under
 [deps/llhttp](https://github.com/nodejs/node/tree/HEAD/deps/llhttp).
 
 In order to update Node.js with a new version of llhttp you can use the
-`tools/update-llhttp.sh` script.
+`tools/dep_updaters/update-llhttp.sh` script.
 
 The contents of the `deps/llhttp` folder should look like the following:
 
@@ -113,11 +115,7 @@ directory and C++ code in the
 
 The low-level implementation of
 [HTTP2](https://nodejs.org/docs/latest/api/http2.html)
-is based on [nghttp2](https://nghttp2.org/). Updates are pulled into Node.js
-under [deps/nghttp2](https://github.com/nodejs/node/tree/HEAD/deps/nghttp2)
-as needed.
+is based on [nghttp2](https://nghttp2.org/). See [maintaining nghttp2][].
 
-The low-level implementation is made available in the Node.js API through
-JavaScript code in the [lib](https://github.com/nodejs/node/tree/HEAD/lib)
-directory and C++ code in the
-[src](https://github.com/nodejs/node/tree/HEAD/src) directory.
+[maintaining nghttp2]: ./maintaining-nghttp2.md
+[maintaining undici]: ./maintaining-undici.md

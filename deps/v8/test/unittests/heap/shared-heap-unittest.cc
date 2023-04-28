@@ -19,23 +19,21 @@ using SharedHeapTest = TestJSSharedMemoryWithIsolate;
 class SharedHeapNoClientsTest : public TestJSSharedMemoryWithPlatform {
  public:
   SharedHeapNoClientsTest() {
-    bool created;
-    shared_isolate_ = Isolate::GetProcessWideSharedIsolate(&created);
-    CHECK(created);
+    shared_space_isolate_wrapper.emplace(kNoCounters);
+    shared_space_isolate_ = shared_space_isolate_wrapper->i_isolate();
   }
 
-  ~SharedHeapNoClientsTest() override {
-    Isolate::DeleteProcessWideSharedIsolate();
+  ~SharedHeapNoClientsTest() override { shared_space_isolate_ = nullptr; }
+
+  v8::Isolate* shared_space_isolate() {
+    return reinterpret_cast<v8::Isolate*>(i_shared_space_isolate());
   }
 
-  v8::Isolate* shared_isolate() {
-    return reinterpret_cast<v8::Isolate*>(i_shared_isolate());
-  }
-
-  Isolate* i_shared_isolate() { return shared_isolate_; }
+  Isolate* i_shared_space_isolate() { return shared_space_isolate_; }
 
  private:
-  Isolate* shared_isolate_;
+  Isolate* shared_space_isolate_;
+  base::Optional<IsolateWrapper> shared_space_isolate_wrapper;
 };
 
 namespace {
@@ -182,10 +180,7 @@ TEST_F(SharedHeapTest, ConcurrentAllocationInSharedMapSpace) {
 }
 
 TEST_F(SharedHeapNoClientsTest, SharedCollectionWithoutClients) {
-  DCHECK_NULL(i_shared_isolate()->heap()->new_space());
-  DCHECK_NULL(i_shared_isolate()->heap()->new_lo_space());
-
-  ::v8::internal::CollectGarbage(OLD_SPACE, shared_isolate());
+  ::v8::internal::CollectGarbage(OLD_SPACE, shared_space_isolate());
 }
 
 void AllocateInSharedHeap(int iterations = 100) {

@@ -7,6 +7,9 @@
 <!-- YAML
 added: v8.5.0
 changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/44710
+    description: Loader hooks are executed off the main thread.
   - version:
     - v18.6.0
     - v16.17.0
@@ -325,6 +328,9 @@ added:
   - v13.9.0
   - v12.16.2
 changes:
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/44710
+    description: This API now returns a string synchronously instead of a Promise.
   - version:
       - v16.2.0
       - v14.18.0
@@ -340,28 +346,25 @@ command flag enabled.
 * `specifier` {string} The module specifier to resolve relative to `parent`.
 * `parent` {string|URL} The absolute parent module URL to resolve from. If none
   is specified, the value of `import.meta.url` is used as the default.
-* Returns: {Promise}
+* Returns: {string}
 
 Provides a module-relative resolution function scoped to each module, returning
-the URL string.
+the URL string. In alignment with browser behavior, this now returns
+synchronously.
 
-<!-- eslint-skip -->
+> **Caveat** This can result in synchronous file-system operations, which
+> can impact performance similarly to `require.resolve`.
 
 ```js
-const dependencyAsset = await import.meta.resolve('component-lib/asset.css');
+const dependencyAsset = import.meta.resolve('component-lib/asset.css');
 ```
 
 `import.meta.resolve` also accepts a second argument which is the parent module
-from which to resolve from:
-
-<!-- eslint-skip -->
+from which to resolve:
 
 ```js
-await import.meta.resolve('./dep', import.meta.url);
+import.meta.resolve('./dep', import.meta.url);
 ```
-
-This function is asynchronous because the ES module resolver in Node.js is
-allowed to be asynchronous.
 
 ## Interoperability with CommonJS
 
@@ -486,9 +489,9 @@ These CommonJS variables are not available in ES modules.
 `__filename` and `__dirname` use cases can be replicated via
 [`import.meta.url`][].
 
-#### No Native Module Loading
+#### No Addon Loading
 
-Native modules are not currently supported with ES module imports.
+[Addons][] are not currently supported with ES module imports.
 
 They can instead be loaded with [`module.createRequire()`][] or
 [`process.dlopen`][].
@@ -701,8 +704,9 @@ changes:
 To customize the default module resolution, loader hooks can optionally be
 provided via a `--experimental-loader ./loader-name.mjs` argument to Node.js.
 
-When hooks are used they apply to the entry point and all `import` calls. They
-won't apply to `require` calls; those still follow [CommonJS][] rules.
+When hooks are used they apply to each subsequent loader, the entry point, and
+all `import` calls. They won't apply to `require` calls; those still follow
+[CommonJS][] rules.
 
 Loaders follow the pattern of `--require`:
 
@@ -729,6 +733,11 @@ A hook that returns without calling `next<hookName>()` _and_ without returning
 `shortCircuit: true` also triggers an exception. These errors are to help
 prevent unintentional breaks in the chain.
 
+Hooks are run in a separate thread, isolated from the main. That means it is a
+different [realm](https://tc39.es/ecma262/#realm). The hooks thread may be
+terminated by the main thread at any time, so do not depend on asynchronous
+operations (like `console.log`) to complete.
+
 #### `resolve(specifier, context, nextResolve)`
 
 <!-- YAML
@@ -753,34 +762,39 @@ changes:
 * `specifier` {string}
 * `context` {Object}
   * `conditions` {string\[]} Export conditions of the relevant `package.json`
-  * `importAssertions` {Object}
+  * `importAssertions` {Object} An object whose key-value pairs represent the
+    assertions for the module to import
   * `parentURL` {string|undefined} The module importing this one, or undefined
     if this is the Node.js entry point
 * `nextResolve` {Function} The subsequent `resolve` hook in the chain, or the
   Node.js default `resolve` hook after the last user-supplied `resolve` hook
   * `specifier` {string}
   * `context` {Object}
-* Returns: {Object}
+* Returns: {Object|Promise}
   * `format` {string|null|undefined} A hint to the load hook (it might be
     ignored)
     `'builtin' | 'commonjs' | 'json' | 'module' | 'wasm'`
+  * `importAssertions` {Object|undefined} The import assertions to use when
+    caching the module (optional; if excluded the input will be used)
   * `shortCircuit` {undefined|boolean} A signal that this hook intends to
     terminate the chain of `resolve` hooks. **Default:** `false`
   * `url` {string} The absolute URL to which this input resolves
 
-The `resolve` hook chain is responsible for resolving file URL for a given
-module specifier and parent URL, and optionally its format (such as `'module'`)
-as a hint to the `load` hook. If a format is specified, the `load` hook is
-ultimately responsible for providing the final `format` value (and it is free to
-ignore the hint provided by `resolve`); if `resolve` provides a `format`, a
-custom `load` hook is required even if only to pass the value to the Node.js
-default `load` hook.
+> **Caveat** Despite support for returning promises and async functions, calls
+> to `resolve` may block the main thread which can impact performance.
 
-The module specifier is the string in an `import` statement or
-`import()` expression.
+The `resolve` hook chain is responsible for telling Node.js where to find and
+how to cache a given `import` statement or expression. It can optionally return
+its format (such as `'module'`) as a hint to the `load` hook. If a format is
+specified, the `load` hook is ultimately responsible for providing the final
+`format` value (and it is free to ignore the hint provided by `resolve`); if
+`resolve` provides a `format`, a custom `load` hook is required even if only to
+pass the value to the Node.js default `load` hook.
 
-The parent URL is the URL of the module that imported this one, or `undefined`
-if this is the main entry point for the application.
+Import type assertions are part of the cache key for saving loaded modules into
+the internal module cache. The `resolve` hook is responsible for
+returning an `importAssertions` object if the module should be cached with
+different assertions than were present in the source code.
 
 The `conditions` property in `context` is an array of conditions for
 [package exports conditions][Conditional Exports] that apply to this resolution
@@ -794,7 +808,7 @@ Node.js module specifier resolution behavior_ when calling `defaultResolve`, the
 `context.conditions` array originally passed into the `resolve` hook.
 
 ```js
-export async function resolve(specifier, context, nextResolve) {
+export function resolve(specifier, context, nextResolve) {
   const { parentURL = null } = context;
 
   if (Math.random() > 0.5) { // Some condition.
@@ -1024,7 +1038,7 @@ export function resolve(specifier, context, nextResolve) {
   if (specifier.startsWith('https://')) {
     return {
       shortCircuit: true,
-      url: specifier
+      url: specifier,
     };
   } else if (parentURL && parentURL.startsWith('https://')) {
     return {
@@ -1044,6 +1058,7 @@ export function load(url, context, nextLoad) {
     return new Promise((resolve, reject) => {
       get(url, (res) => {
         let data = '';
+        res.setEncoding('utf8');
         res.on('data', (chunk) => data += chunk);
         res.on('end', () => resolve({
           // This example assumes all network-provided JavaScript is ES module
@@ -1097,7 +1112,7 @@ const baseURL = pathToFileURL(`${cwd()}/`).href;
 // CoffeeScript files end in .coffee, .litcoffee, or .coffee.md.
 const extensionsRegex = /\.coffee$|\.litcoffee$|\.coffee\.md$/;
 
-export async function resolve(specifier, context, nextResolve) {
+export function resolve(specifier, context, nextResolve) {
   if (extensionsRegex.test(specifier)) {
     const { parentURL = baseURL } = context;
 
@@ -1105,7 +1120,7 @@ export async function resolve(specifier, context, nextResolve) {
     // specifiers ending in the CoffeeScript file extensions.
     return {
       shortCircuit: true,
-      url: new URL(specifier, parentURL).href
+      url: new URL(specifier, parentURL).href,
     };
   }
 
@@ -1126,7 +1141,7 @@ export async function load(url, context, nextLoad) {
     // file, search up the file system for the nearest parent package.json file
     // and read its "type" field.
     const format = await getPackageType(url);
-    // When a hook returns a format of 'commonjs', `source` is be ignored.
+    // When a hook returns a format of 'commonjs', `source` is ignored.
     // To handle CommonJS files, a handler needs to be registered with
     // `require.extensions` in order to process the files with the CommonJS
     // loader. Avoiding the need for a separate CommonJS handler is a future
@@ -1525,6 +1540,7 @@ for ESM specifiers is [commonjs-extension-resolution-loader][].
 <!-- Note: The cjs-module-lexer link should be kept in-sync with the deps version -->
 
 [6.1.7 Array Index]: https://tc39.es/ecma262/#integer-index
+[Addons]: addons.md
 [CommonJS]: modules.md
 [Conditional exports]: packages.md#conditional-exports
 [Core modules]: modules.md#core-modules

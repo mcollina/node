@@ -49,7 +49,7 @@ more of these reasons:
 3. They have a system wide configuration for the
    dependency that all applications should respect.
 
-## Supporting externalized dependencies with native code.
+## Supporting externalized dependencies with native code
 
 Support for externalized dependencies with native code for which a
 shared library is available can added by:
@@ -67,7 +67,7 @@ shared library is available can added by:
   If there are additional libraries that are required it is
   possible to list more than one with the `pkgname` option.
 * in `node.gypi` guard the build for the dependency
-  with `node_shared_depname` so that is is only built if
+  with `node_shared_depname` so that it is only built if
   the dependency is being bundled into Node.js itself. For example:
 
 ```text
@@ -76,7 +76,7 @@ shared library is available can added by:
     }],
 ```
 
-## Supporting externalizable dependencies with JavaScript codeIZA
+## Supporting externalizable dependencies with JavaScript code
 
 Support for an externalizable dependency with JavaScript code
 can be added by:
@@ -90,12 +90,12 @@ can be added by:
   the new option by running `./configure --help`.
 
 * adding a call to `AddExternalizedBuiltin` to the constructor
-  for BuildinLoader in `src/node_builtins.cc` for the
+  for BuiltinLoader in `src/node_builtins.cc` for the
   dependency using the `NODE_SHARED_BUILTLIN` #define generated for
   the dependency. After running `./configure` with the new
   option you can find the #define in `config.gypi`. You can cut and
   paste one of the existing entries and then update to match the
-  inport name for the dependency and the #define generated.
+  import name for the dependency and the #define generated.
 
 ## Supporting non-externalized dependencies with JavaScript code
 

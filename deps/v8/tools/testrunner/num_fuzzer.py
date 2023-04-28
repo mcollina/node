@@ -77,9 +77,6 @@ class NumFuzzer(base_runner.BaseTestRunner):
     parser.add_option("--stress-deopt", default=0, type="int",
                       help="probability [0-10] of adding --deopt-every-n-times "
                            "flag to the test")
-    parser.add_option("--stress-deopt-min", default=1, type="int",
-                      help="extends --stress-deopt to have minimum interval "
-                           "between deopt points")
     parser.add_option("--stress-interrupt-budget", default=0, type="int",
                       help="probability [0-10] of adding the --interrupt-budget "
                            "flag to the test")
@@ -158,8 +155,7 @@ class NumFuzzer(base_runner.BaseTestRunner):
     results = ResultsTracker.create(self.options)
     execproc = ExecutionProc(ctx, self.options.j)
     sigproc = self._create_signal_proc()
-    progress = ProgressProc(ctx, self.options, self.framework_name,
-                            tests.test_count_estimate)
+    progress = ProgressProc(ctx, self.options, tests.test_count_estimate)
     procs = [
         loader,
         NameFilterProc(args) if args else None,

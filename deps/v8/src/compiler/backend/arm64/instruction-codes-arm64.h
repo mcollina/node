@@ -42,6 +42,9 @@ namespace compiler {
   V(Arm64StrQ)                                             \
   V(Arm64StrS)                                             \
   V(Arm64StrW)                                             \
+  V(Arm64LdrDecompressTaggedSigned)                        \
+  V(Arm64LdrDecompressTagged)                              \
+  V(Arm64StrCompressTagged)                                \
   V(Arm64Word64AtomicLoadUint64)                           \
   V(Arm64Word64AtomicStoreWord64)
 
@@ -80,6 +83,7 @@ namespace compiler {
   V(Arm64Mul32)                                      \
   V(Arm64Smlal)                                      \
   V(Arm64Smlal2)                                     \
+  V(Arm64Smulh)                                      \
   V(Arm64Smull)                                      \
   V(Arm64Smull2)                                     \
   V(Arm64Uadalp)                                     \
@@ -87,6 +91,7 @@ namespace compiler {
   V(Arm64Umlal)                                      \
   V(Arm64Umlal2)                                     \
   V(Arm64Umull)                                      \
+  V(Arm64Umulh)                                      \
   V(Arm64Umull2)                                     \
   V(Arm64Madd)                                       \
   V(Arm64Madd32)                                     \
@@ -196,13 +201,8 @@ namespace compiler {
   V(Arm64Float64InsertHighWord32)                    \
   V(Arm64Float64MoveU64)                             \
   V(Arm64U64MoveFloat64)                             \
-  V(Arm64LdrDecompressTaggedSigned)                  \
-  V(Arm64LdrDecompressTaggedPointer)                 \
-  V(Arm64LdrDecompressAnyTagged)                     \
   V(Arm64LdarDecompressTaggedSigned)                 \
-  V(Arm64LdarDecompressTaggedPointer)                \
-  V(Arm64LdarDecompressAnyTagged)                    \
-  V(Arm64StrCompressTagged)                          \
+  V(Arm64LdarDecompressTagged)                       \
   V(Arm64StlrCompressTagged)                         \
   V(Arm64LdrDecodeSandboxedPointer)                  \
   V(Arm64StrEncodeSandboxedPointer)                  \

@@ -224,7 +224,6 @@ assert.throws(() => new Blob({}), {
   // The Blob has to be over a specific size for the data to
   // be copied asynchronously..
   const b = new Blob(['hello', 'there'.repeat(820)]);
-  assert.strictEqual(b.arrayBuffer(), b.arrayBuffer());
   b.arrayBuffer().then(common.mustCall());
 }
 
@@ -286,4 +285,46 @@ assert.throws(() => new Blob({}), {
 
   assert.strictEqual(blob.size, 28);
   assert.strictEqual(blob.type, '');
+})().then(common.mustCall());
+
+{
+  // Testing the defaults
+  [undefined, null, { __proto__: null }, { type: undefined }, {
+    get type() {}, // eslint-disable-line getter-return
+  }].forEach((options) => {
+    assert.strictEqual(
+      new Blob([], options).type,
+      new Blob([]).type,
+    );
+  });
+
+  Reflect.defineProperty(Object.prototype, 'type', {
+    __proto__: null,
+    configurable: true,
+    get: common.mustCall(() => 3, 7),
+  });
+
+  [{}, [], () => {}, Number, new Number(), new String(), new Boolean()].forEach(
+    (options) => {
+      assert.strictEqual(new Blob([], options).type, '3');
+    },
+  );
+  [0, '', true, Symbol(), 0n].forEach((options) => {
+    assert.throws(() => new Blob([], options), { code: 'ERR_INVALID_ARG_TYPE' });
+  });
+
+  delete Object.prototype.type;
+}
+
+(async () => {
+  // Refs: https://github.com/nodejs/node/issues/47301
+
+  const random = Buffer.alloc(256).fill('0');
+  const chunks = [];
+
+  for (let i = 0; i < random.length; i += 2) {
+    chunks.push(random.subarray(i, i + 2));
+  }
+
+  await new Blob(chunks).arrayBuffer();
 })().then(common.mustCall());

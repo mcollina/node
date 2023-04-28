@@ -137,7 +137,6 @@ void NodeCategorySet::Initialize(Local<Object> target,
       NewFunctionTemplate(isolate, NodeCategorySet::New);
   category_set->InstanceTemplate()->SetInternalFieldCount(
       NodeCategorySet::kInternalFieldCount);
-  category_set->Inherit(BaseObject::GetConstructorTemplate(env));
   SetProtoMethod(isolate, category_set, "enable", NodeCategorySet::Enable);
   SetProtoMethod(isolate, category_set, "disable", NodeCategorySet::Disable);
 
@@ -168,7 +167,7 @@ void NodeCategorySet::RegisterExternalReferences(
 
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(trace_events,
-                                   node::NodeCategorySet::Initialize)
-NODE_MODULE_EXTERNAL_REFERENCE(
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(trace_events,
+                                    node::NodeCategorySet::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(
     trace_events, node::NodeCategorySet::RegisterExternalReferences)

@@ -12,6 +12,7 @@
 #include "src/common/globals.h"
 #include "src/compiler/backend/instruction.h"
 #include "src/compiler/js-heap-broker.h"
+#include "src/execution/frame-constants.h"
 #include "src/maglev/maglev-compilation-info.h"
 #include "src/maglev/maglev-ir.h"
 
@@ -24,9 +25,8 @@ class MaglevAssembler;
 
 class DeferredCodeInfo {
  public:
-  virtual void Generate(MaglevAssembler* masm, Label* return_label) = 0;
+  virtual void Generate(MaglevAssembler* masm) = 0;
   Label deferred_code_label;
-  Label return_label;
 };
 
 class MaglevCodeGenState {
@@ -45,6 +45,9 @@ class MaglevCodeGenState {
   const std::vector<DeferredCodeInfo*>& deferred_code() const {
     return deferred_code_;
   }
+  std::vector<DeferredCodeInfo*> TakeDeferredCode() {
+    return std::exchange(deferred_code_, std::vector<DeferredCodeInfo*>());
+  }
   void PushEagerDeopt(EagerDeoptInfo* info) { eager_deopts_.push_back(info); }
   void PushLazyDeopt(LazyDeoptInfo* info) { lazy_deopts_.push_back(info); }
   const std::vector<EagerDeoptInfo*>& eager_deopts() const {
@@ -60,7 +63,6 @@ class MaglevCodeGenState {
   compiler::NativeContextRef native_context() const {
     return broker()->target_native_context();
   }
-  Isolate* isolate() const { return compilation_info_->isolate(); }
   compiler::JSHeapBroker* broker() const { return compilation_info_->broker(); }
   MaglevGraphLabeller* graph_labeller() const {
     return compilation_info_->graph_labeller();
@@ -71,6 +73,43 @@ class MaglevCodeGenState {
     return safepoint_table_builder_;
   }
   MaglevCompilationInfo* compilation_info() const { return compilation_info_; }
+
+  Label* entry_label() { return &entry_label_; }
+
+  void set_max_deopted_stack_size(uint32_t max_deopted_stack_size) {
+    max_deopted_stack_size_ = max_deopted_stack_size;
+  }
+
+  void set_max_call_stack_args_(uint32_t max_call_stack_args) {
+    max_call_stack_args_ = max_call_stack_args;
+  }
+
+  uint32_t stack_check_offset() {
+    int32_t parameter_slots =
+        compilation_info_->toplevel_compilation_unit()->parameter_count();
+    uint32_t stack_slots = tagged_slots_ + untagged_slots_;
+    DCHECK(is_int32(stack_slots));
+    int32_t optimized_frame_height = parameter_slots * kSystemPointerSize +
+                                     StandardFrameConstants::kFixedFrameSize +
+                                     stack_slots * kSystemPointerSize;
+    DCHECK(is_int32(max_deopted_stack_size_));
+    int32_t signed_max_unoptimized_frame_height =
+        static_cast<int32_t>(max_deopted_stack_size_);
+
+    // The offset is either the delta between the optimized frames and the
+    // interpreted frame, or the maximal number of bytes pushed to the stack
+    // while preparing for function calls, whichever is bigger.
+    uint32_t frame_height_delta = static_cast<uint32_t>(std::max(
+        signed_max_unoptimized_frame_height - optimized_frame_height, 0));
+    uint32_t max_pushed_argument_bytes =
+        static_cast<uint32_t>(max_call_stack_args_ * kSystemPointerSize);
+    if (v8_flags.deopt_to_baseline) {
+      // If we deopt to baseline, we need to be sure that we have enough space
+      // to recreate the unoptimize frame plus arguments to the largest call.
+      return frame_height_delta + max_pushed_argument_bytes;
+    }
+    return std::max(frame_height_delta, max_pushed_argument_bytes);
+  }
 
  private:
   MaglevCompilationInfo* const compilation_info_;
@@ -83,6 +122,11 @@ class MaglevCodeGenState {
 
   int untagged_slots_ = 0;
   int tagged_slots_ = 0;
+  uint32_t max_deopted_stack_size_ = kMaxUInt32;
+  uint32_t max_call_stack_args_ = kMaxUInt32;
+
+  // Entry point label for recursive calls.
+  Label entry_label_;
 };
 
 // Some helpers for codegen.

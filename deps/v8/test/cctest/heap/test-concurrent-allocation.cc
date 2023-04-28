@@ -20,6 +20,7 @@
 #include "src/heap/concurrent-allocator-inl.h"
 #include "src/heap/heap.h"
 #include "src/heap/local-heap-inl.h"
+#include "src/heap/marking-state-inl.h"
 #include "src/heap/parked-scope.h"
 #include "src/heap/safepoint.h"
 #include "src/objects/heap-number.h"
@@ -131,7 +132,14 @@ UNINITIALIZED_TEST(ConcurrentAllocationInOldSpaceFromMainThread) {
 }
 
 UNINITIALIZED_TEST(ConcurrentAllocationWhileMainThreadIsParked) {
+#ifndef V8_ENABLE_CONSERVATIVE_STACK_SCANNING
   v8_flags.max_old_space_size = 4;
+#else
+  // With CSS, it is expected that the GCs triggered by concurrent allocation
+  // will reclaim less memory. If this test fails, this limit should probably
+  // be further increased.
+  v8_flags.max_old_space_size = 10;
+#endif
   v8_flags.stress_concurrent_allocation = false;
 
   v8::Isolate::CreateParams create_params;
@@ -161,9 +169,17 @@ UNINITIALIZED_TEST(ConcurrentAllocationWhileMainThreadIsParked) {
 }
 
 UNINITIALIZED_TEST(ConcurrentAllocationWhileMainThreadParksAndUnparks) {
+#ifndef V8_ENABLE_CONSERVATIVE_STACK_SCANNING
   v8_flags.max_old_space_size = 4;
+#else
+  // With CSS, it is expected that the GCs triggered by concurrent allocation
+  // will reclaim less memory. If this test fails, this limit should probably
+  // be further increased.
+  v8_flags.max_old_space_size = 10;
+#endif
   v8_flags.stress_concurrent_allocation = false;
   v8_flags.incremental_marking = false;
+  i::FlagList::EnforceFlagImplications();
 
   v8::Isolate::CreateParams create_params;
   create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
@@ -173,22 +189,24 @@ UNINITIALIZED_TEST(ConcurrentAllocationWhileMainThreadParksAndUnparks) {
   std::vector<std::unique_ptr<ConcurrentAllocationThread>> threads;
   const int kThreads = 4;
 
-  for (int i = 0; i < kThreads; i++) {
-    auto thread =
-        std::make_unique<ConcurrentAllocationThread>(i_isolate->heap());
-    CHECK(thread->Start());
-    threads.push_back(std::move(thread));
-  }
-
-  for (int i = 0; i < 300'000; i++) {
-    ParkedScope scope(i_isolate->main_thread_local_isolate());
-  }
-
   {
-    ParkedScope scope(i_isolate->main_thread_local_isolate());
+    for (int i = 0; i < kThreads; i++) {
+      auto thread =
+          std::make_unique<ConcurrentAllocationThread>(i_isolate->heap());
+      CHECK(thread->Start());
+      threads.push_back(std::move(thread));
+    }
 
-    for (auto& thread : threads) {
-      thread->Join();
+    for (int i = 0; i < 300'000; i++) {
+      ParkedScope scope(i_isolate->main_thread_local_isolate());
+    }
+
+    {
+      ParkedScope scope(i_isolate->main_thread_local_isolate());
+
+      for (auto& thread : threads) {
+        thread->Join();
+      }
     }
   }
 
@@ -196,9 +214,17 @@ UNINITIALIZED_TEST(ConcurrentAllocationWhileMainThreadParksAndUnparks) {
 }
 
 UNINITIALIZED_TEST(ConcurrentAllocationWhileMainThreadRunsWithSafepoints) {
+#ifndef V8_ENABLE_CONSERVATIVE_STACK_SCANNING
   v8_flags.max_old_space_size = 4;
+#else
+  // With CSS, it is expected that the GCs triggered by concurrent allocation
+  // will reclaim less memory. If this test fails, this limit should probably
+  // be further increased.
+  v8_flags.max_old_space_size = 10;
+#endif
   v8_flags.stress_concurrent_allocation = false;
   v8_flags.incremental_marking = false;
+  i::FlagList::EnforceFlagImplications();
 
   v8::Isolate::CreateParams create_params;
   create_params.array_buffer_allocator = CcTest::array_buffer_allocator();
@@ -208,23 +234,26 @@ UNINITIALIZED_TEST(ConcurrentAllocationWhileMainThreadRunsWithSafepoints) {
   std::vector<std::unique_ptr<ConcurrentAllocationThread>> threads;
   const int kThreads = 4;
 
-  for (int i = 0; i < kThreads; i++) {
-    auto thread =
-        std::make_unique<ConcurrentAllocationThread>(i_isolate->heap());
-    CHECK(thread->Start());
-    threads.push_back(std::move(thread));
-  }
-
-  // Some of the following Safepoint() invocations are supposed to perform a GC.
-  for (int i = 0; i < 1'000'000; i++) {
-    i_isolate->main_thread_local_heap()->Safepoint();
-  }
-
   {
-    ParkedScope scope(i_isolate->main_thread_local_isolate());
+    for (int i = 0; i < kThreads; i++) {
+      auto thread =
+          std::make_unique<ConcurrentAllocationThread>(i_isolate->heap());
+      CHECK(thread->Start());
+      threads.push_back(std::move(thread));
+    }
 
-    for (auto& thread : threads) {
-      thread->Join();
+    // Some of the following Safepoint() invocations are supposed to perform a
+    // GC.
+    for (int i = 0; i < 1'000'000; i++) {
+      i_isolate->main_thread_local_heap()->Safepoint();
+    }
+
+    {
+      ParkedScope scope(i_isolate->main_thread_local_isolate());
+
+      for (auto& thread : threads) {
+        thread->Join();
+      }
     }
   }
 
@@ -250,7 +279,7 @@ class LargeObjectConcurrentAllocationThread final : public v8::base::Thread {
           kLargeObjectSize, AllocationType::kOld, AllocationOrigin::kRuntime,
           AllocationAlignment::kTaggedAligned);
       if (result.IsFailure()) {
-        local_heap.TryPerformCollection();
+        heap_->CollectGarbageFromAnyThread(&local_heap);
       } else {
         Address address = result.ToAddress();
         CreateFixedArray(heap_, address, kLargeObjectSize);
@@ -371,9 +400,9 @@ UNINITIALIZED_TEST(ConcurrentBlackAllocation) {
     HeapObject object = HeapObject::FromAddress(address);
 
     if (i < kWhiteIterations * kObjectsAllocatedPerIteration) {
-      CHECK(heap->incremental_marking()->marking_state()->IsWhite(object));
+      CHECK(heap->marking_state()->IsUnmarked(object));
     } else {
-      CHECK(heap->incremental_marking()->marking_state()->IsBlack(object));
+      CHECK(heap->marking_state()->IsMarked(object));
     }
   }
 
@@ -427,7 +456,7 @@ UNINITIALIZED_TEST(ConcurrentWriteBarrier) {
   }
   heap->StartIncrementalMarking(i::Heap::kNoGCFlags,
                                 i::GarbageCollectionReason::kTesting);
-  CHECK(heap->incremental_marking()->marking_state()->IsWhite(value));
+  CHECK(heap->marking_state()->IsUnmarked(value));
 
   auto thread =
       std::make_unique<ConcurrentWriteBarrierThread>(heap, fixed_array, value);
@@ -435,7 +464,7 @@ UNINITIALIZED_TEST(ConcurrentWriteBarrier) {
 
   thread->Join();
 
-  CHECK(heap->incremental_marking()->marking_state()->IsBlackOrGrey(value));
+  CHECK(heap->marking_state()->IsBlackOrGrey(value));
   heap::InvokeMarkSweep(i_isolate);
 
   isolate->Dispose();
@@ -454,7 +483,7 @@ class ConcurrentRecordRelocSlotThread final : public v8::base::Thread {
     RwxMemoryWriteScope::SetDefaultPermissionsForNewThread();
     LocalHeap local_heap(heap_, ThreadKind::kBackground);
     UnparkedScope unparked_scope(&local_heap);
-    // Modification of Code object requires write access.
+    // Modification of InstructionStream object requires write access.
     RwxMemoryWriteScopeForTesting rwx_write_scope;
     int mode_mask = RelocInfo::EmbeddedObjectModeMask();
     for (RelocIterator it(code_, mode_mask); !it.done(); it.next()) {
@@ -513,7 +542,7 @@ UNINITIALIZED_TEST(ConcurrentRecordRelocSlot) {
     }
     heap->StartIncrementalMarking(i::Heap::kNoGCFlags,
                                   i::GarbageCollectionReason::kTesting);
-    CHECK(heap->incremental_marking()->marking_state()->IsWhite(value));
+    CHECK(heap->marking_state()->IsUnmarked(value));
 
     {
       // TODO(v8:13023): remove ResetPKUPermissionsForThreadSpawning in the
@@ -527,7 +556,7 @@ UNINITIALIZED_TEST(ConcurrentRecordRelocSlot) {
       thread->Join();
     }
 
-    CHECK(heap->incremental_marking()->marking_state()->IsBlackOrGrey(value));
+    CHECK(heap->marking_state()->IsBlackOrGrey(value));
     heap::InvokeMarkSweep(i_isolate);
   }
   isolate->Dispose();

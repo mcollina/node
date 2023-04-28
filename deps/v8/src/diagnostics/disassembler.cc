@@ -257,10 +257,8 @@ static void PrintRelocInfo(std::ostringstream& out, Isolate* isolate,
     out << "    ;; external reference (" << reference_name << ")";
   } else if (RelocInfo::IsCodeTargetMode(rmode)) {
     out << "    ;; code:";
-    CodeT code =
-        isolate->heap()
-            ->GcSafeFindCodeForInnerPointer(relocinfo->target_address())
-            .ToCodeT();
+    Code code =
+        isolate->heap()->FindCodeForInnerPointer(relocinfo->target_address());
     CodeKind kind = code.kind();
     if (code.is_builtin()) {
       out << " Builtin::" << Builtins::name(code.builtin_id());
@@ -275,16 +273,6 @@ static void PrintRelocInfo(std::ostringstream& out, Isolate* isolate,
             relocinfo->wasm_stub_call_address()));
     out << "    ;; wasm stub: " << runtime_stub_name;
 #endif  // V8_ENABLE_WEBASSEMBLY
-  } else if (RelocInfo::IsRuntimeEntry(rmode) && isolate != nullptr) {
-    // A runtime entry relocinfo might be a deoptimization bailout.
-    Address addr = relocinfo->target_address();
-    DeoptimizeKind type;
-    if (Deoptimizer::IsDeoptimizationEntry(isolate, addr, &type)) {
-      out << "    ;; " << Deoptimizer::MessageFor(type)
-          << " deoptimization bailout";
-    } else {
-      out << "    ;; " << RelocInfo::RelocModeName(rmode);
-    }
   } else {
     out << "    ;; " << RelocInfo::RelocModeName(rmode);
   }
@@ -326,8 +314,7 @@ static int DecodeIt(Isolate* isolate, ExternalReferenceEncoder* ref_encoder,
       } else if (!rit.done() &&
                  rit.rinfo()->pc() == reinterpret_cast<Address>(pc) &&
                  (rit.rinfo()->rmode() == RelocInfo::INTERNAL_REFERENCE ||
-                  rit.rinfo()->rmode() == RelocInfo::LITERAL_CONSTANT ||
-                  rit.rinfo()->rmode() == RelocInfo::DATA_EMBEDDED_OBJECT)) {
+                  rit.rinfo()->rmode() == RelocInfo::LITERAL_CONSTANT)) {
         // raw pointer embedded in code stream, e.g., jump table
         byte* ptr =
             base::ReadUnalignedValue<byte*>(reinterpret_cast<Address>(pc));
@@ -376,7 +363,8 @@ static int DecodeIt(Isolate* isolate, ExternalReferenceEncoder* ref_encoder,
     }
 
     // Instruction address and instruction offset.
-    if (FLAG_log_colour && reinterpret_cast<Address>(prev_pc) == current_pc) {
+    if (v8_flags.log_colour &&
+        reinterpret_cast<Address>(prev_pc) == current_pc) {
       // If this is the given "current" pc, make it yellow and bold.
       out << "\033[33;1m";
     }
@@ -388,21 +376,21 @@ static int DecodeIt(Isolate* isolate, ExternalReferenceEncoder* ref_encoder,
 
     // Print all the reloc info for this instruction which are not comments.
     for (size_t i = 0; i < pcs.size(); i++) {
-      // Put together the reloc info
+      // Put together the reloc info.
       const CodeReference& host = code;
       Address constant_pool =
           host.is_null() ? kNullAddress : host.constant_pool();
-      Code code_pointer;
+      Handle<Code> code_handle;
       if (host.is_code()) {
-        code_pointer = *host.as_code();
+        code_handle = host.as_code();
+
+        RelocInfo relocinfo(pcs[i], rmodes[i], datas[i], *code_handle,
+                            code_handle->instruction_stream(), constant_pool);
+
+        bool first_reloc_info = (i == 0);
+        PrintRelocInfo(out, isolate, ref_encoder, os, code, &relocinfo,
+                       first_reloc_info);
       }
-
-      RelocInfo relocinfo(pcs[i], rmodes[i], datas[i], code_pointer,
-                          constant_pool);
-
-      bool first_reloc_info = (i == 0);
-      PrintRelocInfo(out, isolate, ref_encoder, os, code, &relocinfo,
-                     first_reloc_info);
     }
 
     // If this is a constant pool load and we haven't found any RelocInfo
@@ -414,7 +402,7 @@ static int DecodeIt(Isolate* isolate, ExternalReferenceEncoder* ref_encoder,
     // by IsInConstantPool() below.
     if (pcs.empty() && !code.is_null() && !decoding_constant_pool) {
       RelocInfo dummy_rinfo(reinterpret_cast<Address>(prev_pc),
-                            RelocInfo::NO_INFO, 0, Code());
+                            RelocInfo::NO_INFO, 0, Code(), InstructionStream());
       if (dummy_rinfo.IsInConstantPool()) {
         Address constant_pool_entry_address =
             dummy_rinfo.constant_pool_entry_address();
@@ -432,7 +420,8 @@ static int DecodeIt(Isolate* isolate, ExternalReferenceEncoder* ref_encoder,
       }
     }
 
-    if (FLAG_log_colour && reinterpret_cast<Address>(prev_pc) == current_pc) {
+    if (v8_flags.log_colour &&
+        reinterpret_cast<Address>(prev_pc) == current_pc) {
       out << "\033[m";
     }
 
@@ -451,7 +440,7 @@ static int DecodeIt(Isolate* isolate, ExternalReferenceEncoder* ref_encoder,
 
 int Disassembler::Decode(Isolate* isolate, std::ostream& os, byte* begin,
                          byte* end, CodeReference code, Address current_pc) {
-  DCHECK_WITH_MSG(FLAG_text_is_readable,
+  DCHECK_WITH_MSG(v8_flags.text_is_readable,
                   "Builtins disassembly requires a readable .text section");
   V8NameConverter v8NameConverter(isolate, code);
   if (isolate) {

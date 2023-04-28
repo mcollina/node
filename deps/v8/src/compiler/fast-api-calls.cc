@@ -4,6 +4,7 @@
 
 #include "src/compiler/fast-api-calls.h"
 
+#include "src/codegen/cpu-features.h"
 #include "src/compiler/globals.h"
 
 namespace v8 {
@@ -28,7 +29,9 @@ ElementsKind GetTypedArrayElementsKind(CTypeInfo::Type type) {
     case CTypeInfo::Type::kFloat64:
       return FLOAT64_ELEMENTS;
     case CTypeInfo::Type::kVoid:
+    case CTypeInfo::Type::kSeqOneByteString:
     case CTypeInfo::Type::kBool:
+    case CTypeInfo::Type::kPointer:
     case CTypeInfo::Type::kV8Value:
     case CTypeInfo::Type::kApiObject:
     case CTypeInfo::Type::kAny:
@@ -84,6 +87,13 @@ OverloadsResolutionResult ResolveOverloads(
 bool CanOptimizeFastSignature(const CFunctionInfo* c_signature) {
   USE(c_signature);
 
+#if defined(V8_OS_MACOS) && defined(V8_TARGET_ARCH_ARM64)
+  // On MacArm64 hardware we don't support passing of arguments on the stack.
+  if (c_signature->ArgumentCount() > 8) {
+    return false;
+  }
+#endif  // defined(V8_OS_MACOS) && defined(V8_TARGET_ARCH_ARM64)
+
 #ifndef V8_ENABLE_FP_PARAMS_IN_C_LINKAGE
   if (c_signature->ReturnInfo().GetType() == CTypeInfo::Type::kFloat32 ||
       c_signature->ReturnInfo().GetType() == CTypeInfo::Type::kFloat64) {
@@ -100,6 +110,14 @@ bool CanOptimizeFastSignature(const CFunctionInfo* c_signature) {
 
   for (unsigned int i = 0; i < c_signature->ArgumentCount(); ++i) {
     USE(i);
+
+#ifdef V8_TARGET_ARCH_X64
+    // Clamp lowering in EffectControlLinearizer uses rounding.
+    uint8_t flags = uint8_t(c_signature->ArgumentInfo(i).GetFlags());
+    if (flags & uint8_t(CTypeInfo::Flags::kClampBit)) {
+      return CpuFeatures::IsSupported(SSE4_2);
+    }
+#endif  // V8_TARGET_ARCH_X64
 
 #ifndef V8_ENABLE_FP_PARAMS_IN_C_LINKAGE
     if (c_signature->ArgumentInfo(i).GetType() == CTypeInfo::Type::kFloat32 ||
@@ -168,21 +186,21 @@ Node* FastApiCallBuilder::WrapFastCall(const CallDescriptor* call_descriptor,
       ExternalReference::fast_api_call_target_address(isolate()));
   __ Store(StoreRepresentation(MachineType::PointerRepresentation(),
                                kNoWriteBarrier),
-           target_address, 0, target);
+           target_address, 0, __ BitcastTaggedToWord(target));
 
   // Disable JS execution
   Node* javascript_execution_assert = __ ExternalConstant(
       ExternalReference::javascript_execution_assert(isolate()));
   static_assert(sizeof(bool) == 1, "Wrong assumption about boolean size.");
 
-  if (FLAG_debug_code) {
+  if (v8_flags.debug_code) {
     auto do_store = __ MakeLabel();
     Node* old_scope_value =
         __ Load(MachineType::Int8(), javascript_execution_assert, 0);
     __ GotoIf(__ Word32Equal(old_scope_value, __ Int32Constant(1)), &do_store);
 
     // We expect that JS execution is enabled, otherwise assert.
-    __ Unreachable(&do_store);
+    __ Unreachable();
     __ Bind(&do_store);
   }
   __ Store(StoreRepresentation(MachineRepresentation::kWord8, kNoWriteBarrier),
@@ -311,10 +329,9 @@ Node* FastApiCallBuilder::Build(const FastApiCallFunctionVector& c_functions,
         __ Int32Constant(0));
 
     Node* data_stack_slot = __ StackSlot(sizeof(uintptr_t), alignof(uintptr_t));
-    __ Store(
-        StoreRepresentation(MachineType::PointerRepresentation(),
-                            kNoWriteBarrier),
-        data_stack_slot, 0, data_argument);
+    __ Store(StoreRepresentation(MachineType::PointerRepresentation(),
+                                 kNoWriteBarrier),
+             data_stack_slot, 0, __ BitcastTaggedToWord(data_argument));
 
     __ Store(StoreRepresentation(MachineType::PointerRepresentation(),
                                  kNoWriteBarrier),

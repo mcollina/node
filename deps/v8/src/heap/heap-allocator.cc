@@ -23,15 +23,8 @@ void HeapAllocator::Setup() {
     spaces_[i] = heap_->space(i);
   }
 
-  space_for_maps_ = spaces_[MAP_SPACE]
-                        ? static_cast<PagedSpace*>(spaces_[MAP_SPACE])
-                        : static_cast<PagedSpace*>(spaces_[OLD_SPACE]);
-
-  shared_old_allocator_ = heap_->shared_old_allocator_.get();
-  shared_map_allocator_ = heap_->shared_map_allocator_
-                              ? heap_->shared_map_allocator_.get()
-                              : shared_old_allocator_;
-  shared_lo_space_ = heap_->shared_lo_space();
+  shared_old_allocator_ = heap_->shared_space_allocator_.get();
+  shared_lo_space_ = heap_->shared_lo_allocation_space();
 }
 
 void HeapAllocator::SetReadOnlySpace(ReadOnlySpace* read_only_space) {
@@ -90,14 +83,10 @@ AllocationResult HeapAllocator::AllocateRawWithLightRetrySlowPath(
   // Two GCs before returning failure.
   for (int i = 0; i < 2; i++) {
     if (IsSharedAllocationType(allocation)) {
-      heap_->CollectSharedGarbage(GarbageCollectionReason::kAllocationFailure);
+      heap_->CollectGarbageShared(heap_->main_thread_local_heap(),
+                                  GarbageCollectionReason::kAllocationFailure);
     } else {
       AllocationSpace space_to_gc = AllocationTypeToGCSpace(allocation);
-      if (v8_flags.minor_mc && i > 0) {
-        // Repeated young gen GCs won't have any additional effect. Do a full GC
-        // instead.
-        space_to_gc = AllocationSpace::OLD_SPACE;
-      }
       heap_->CollectGarbage(space_to_gc,
                             GarbageCollectionReason::kAllocationFailure);
     }
@@ -117,12 +106,13 @@ AllocationResult HeapAllocator::AllocateRawWithRetryOrFailSlowPath(
   if (!result.IsFailure()) return result;
 
   if (IsSharedAllocationType(allocation)) {
-    heap_->CollectSharedGarbage(GarbageCollectionReason::kLastResort);
+    heap_->CollectGarbageShared(heap_->main_thread_local_heap(),
+                                GarbageCollectionReason::kLastResort);
 
     // We need always_allocate() to be true both on the client- and
     // server-isolate. It is used in both code paths.
     AlwaysAllocateScope shared_scope(
-        heap_->isolate()->shared_isolate()->heap());
+        heap_->isolate()->shared_space_isolate()->heap());
     AlwaysAllocateScope client_scope(heap_);
     result = AllocateRaw(size, allocation, origin, alignment);
   } else {

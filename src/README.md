@@ -31,10 +31,13 @@ embedder API.
 Important concepts when using V8 are the ones of [`Isolate`][]s and
 [JavaScript value handles][].
 
+V8 supports [fast API calls][], which can be useful for improving the
+performance in certain cases.
+
 ## libuv API documentation
 
 The other major dependency of Node.js is [libuv][], providing
-the [event loop][] and other operation system abstractions to Node.js.
+the [event loop][] and other operating system abstractions to Node.js.
 
 There is a [reference documentation for the libuv API][].
 
@@ -419,9 +422,9 @@ void Initialize(Local<Object> target,
   SetConstructorFunction(context, target, "ChannelWrap", channel_wrap);
 }
 
-// Run the `Initialize` function when loading this module through
+// Run the `Initialize` function when loading this binding through
 // `internalBinding('cares_wrap')` in Node.js's built-in JavaScript code:
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(cares_wrap, Initialize)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(cares_wrap, Initialize)
 ```
 
 If the C++ binding is loaded during bootstrap, it needs to be registered
@@ -438,10 +441,10 @@ void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
 }  // namespace util
 }  // namespace node
 
-// The first argument passed to `NODE_MODULE_EXTERNAL_REFERENCE`,
+// The first argument passed to `NODE_BINDING_EXTERNAL_REFERENCE`,
 // which is `util` here, needs to be added to the
 // `EXTERNAL_REFERENCE_BINDING_LIST_BASE` list in node_external_reference.h
-NODE_MODULE_EXTERNAL_REFERENCE(util, node::util::RegisterExternalReferences)
+NODE_BINDING_EXTERNAL_REFERENCE(util, node::util::RegisterExternalReferences)
 ```
 
 Otherwise, you might see an error message like this when building the
@@ -479,22 +482,36 @@ Which explains that the unregistered external reference is
 
 Some internal bindings, such as the HTTP parser, maintain internal state that
 only affects that particular binding. In that case, one common way to store
-that state is through the use of `Environment::AddBindingData`, which gives
+that state is through the use of `Realm::AddBindingData`, which gives
 binding functions access to an object for storing such state.
 That object is always a [`BaseObject`][].
 
-Its class needs to have a static `type_name` field based on a
-constant string, in order to disambiguate it from other classes of this type,
-and which could e.g. match the binding's name (in the example above, that would
-be `cares_wrap`).
+In the binding, call `SET_BINDING_ID()` with an identifier for the binding
+type. For example, for `http_parser::BindingData`, the identifier can be
+`http_parser_binding_data`.
+
+If the binding should be supported in a snapshot, the id and the
+fully-specified class name should be added to the `SERIALIZABLE_BINDING_TYPES`
+list in `base_object_types.h`, and the class should implement the serialization
+and deserialization methods. See the comments of `SnapshotableObject` on how to
+implement them. Otherwise, add the id and the class name to the
+`UNSERIALIZABLE_BINDING_TYPES` list instead.
 
 ```cpp
+// In base_object_types.h, add the binding to either
+// UNSERIALIZABLE_BINDING_TYPES or SERIALIZABLE_BINDING_TYPES.
+// The second parameter is a descriptive name of the class, which is
+// usually the fully-specified class name.
+
+#define UNSERIALIZABLE_BINDING_TYPES(V)                                         \
+  V(http_parser_binding_data, http_parser::BindingData)
+
 // In the HTTP parser source code file:
 class BindingData : public BaseObject {
  public:
   BindingData(Environment* env, Local<Object> obj) : BaseObject(env, obj) {}
 
-  static constexpr FastStringKey type_name { "http_parser" };
+  SET_BINDING_ID(http_parser_binding_data)
 
   std::vector<char> parser_buffer;
   bool parser_buffer_in_use = false;
@@ -504,7 +521,7 @@ class BindingData : public BaseObject {
 
 // Available for binding functions, e.g. the HTTP Parser constructor:
 static void New(const FunctionCallbackInfo<Value>& args) {
-  BindingData* binding_data = Environment::GetBindingData<BindingData>(args);
+  BindingData* binding_data = Realm::GetBindingData<BindingData>(args);
   new Parser(binding_data, args.This());
 }
 
@@ -514,21 +531,15 @@ void InitializeHttpParser(Local<Object> target,
                           Local<Value> unused,
                           Local<Context> context,
                           void* priv) {
-  Environment* env = Environment::GetCurrent(context);
+  Realm* realm = Realm::GetCurrent(context);
   BindingData* const binding_data =
-      env->AddBindingData<BindingData>(context, target);
+      realm->AddBindingData<BindingData>(context, target);
   if (binding_data == nullptr) return;
 
-  Local<FunctionTemplate> t = env->NewFunctionTemplate(Parser::New);
+  Local<FunctionTemplate> t = NewFunctionTemplate(realm->isolate(), Parser::New);
   ...
 }
 ```
-
-If the binding is loaded during bootstrap, add it to the
-`SERIALIZABLE_OBJECT_TYPES` list in `src/node_snapshotable.h` and
-inherit from the `SnapshotableObject` class instead. See the comments
-of `SnapshotableObject` on how to implement its serialization and
-deserialization.
 
 <a id="exception-handling"></a>
 
@@ -1055,6 +1066,7 @@ static void GetUserInfo(const FunctionCallbackInfo<Value>& args) {
 [cleanup hooks]: #cleanup-hooks
 [event loop]: #event-loop
 [exception handling]: #exception-handling
+[fast API calls]: ../doc/contributing/adding-v8-fast-api.md
 [internal field]: #internal-fields
 [introduction for V8 embedders]: https://v8.dev/docs/embed
 [libuv]: https://libuv.org/

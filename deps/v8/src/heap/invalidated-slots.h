@@ -64,7 +64,7 @@ class V8_EXPORT_PRIVATE InvalidatedSlotsFilter {
   Address sentinel_;
   InvalidatedObjectInfo current_{kNullAddress, 0, false};
   InvalidatedObjectInfo next_{kNullAddress, 0, false};
-  NonAtomicMarkingState* marking_state_;
+  NonAtomicMarkingState* const marking_state_;
   InvalidatedSlots empty_;
 #ifdef DEBUG
   Address last_slot_;
@@ -78,6 +78,7 @@ class V8_EXPORT_PRIVATE InvalidatedSlotsFilter {
 class V8_EXPORT_PRIVATE InvalidatedSlotsCleanup {
  public:
   static InvalidatedSlotsCleanup OldToNew(MemoryChunk* chunk);
+  static InvalidatedSlotsCleanup OldToOld(MemoryChunk* chunk);
   static InvalidatedSlotsCleanup OldToShared(MemoryChunk* chunk);
   static InvalidatedSlotsCleanup NoCleanup(MemoryChunk* chunk);
 

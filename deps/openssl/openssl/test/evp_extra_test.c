@@ -31,6 +31,7 @@
 #include <openssl/decoder.h>
 #include <openssl/rsa.h>
 #include <openssl/engine.h>
+#include <openssl/proverr.h>
 #include "testutil.h"
 #include "internal/nelem.h"
 #include "internal/sizes.h"
@@ -897,6 +898,7 @@ static int test_EC_priv_pub(void)
     EVP_PKEY *params_and_keypair = NULL;
     BIGNUM *priv = NULL;
     int ret = 0;
+    unsigned char *encoded = NULL;
 
     /*
      * Setup the parameters for our pkey object. For our purposes they don't
@@ -1004,6 +1006,17 @@ static int test_EC_priv_pub(void)
         || !TEST_int_gt(EVP_PKEY_eq(params_and_keypair, params_and_pub), 0)
         || !TEST_int_gt(EVP_PKEY_eq(params_and_keypair, params_and_priv), 0))
         goto err;
+
+    /* Positive and negative testcase for EVP_PKEY_get1_encoded_public_key */
+    if (!TEST_int_gt(EVP_PKEY_get1_encoded_public_key(params_and_pub, &encoded), 0))
+        goto err;
+    OPENSSL_free(encoded);
+    encoded = NULL;
+    if (!TEST_int_eq(EVP_PKEY_get1_encoded_public_key(just_params, &encoded), 0)) {
+        OPENSSL_free(encoded);
+        encoded = NULL;
+        goto err;
+    }
 
     ret = 1;
  err:
@@ -1800,7 +1813,7 @@ static int test_EC_keygen_with_enc(int idx)
 }
 #endif
 
-#if !defined(OPENSSL_NO_SM2) && !defined(FIPS_MODULE)
+#if !defined(OPENSSL_NO_SM2)
 
 static int test_EVP_SM2_verify(void)
 {
@@ -2027,7 +2040,7 @@ static int test_EVP_SM2(void)
                                         sizeof(kMsg))))
             goto done;
 
-        if (!TEST_true(EVP_PKEY_decrypt_init(cctx)))
+        if (!TEST_int_gt(EVP_PKEY_decrypt_init(cctx), 0))
             goto done;
 
         if (!TEST_true(EVP_PKEY_CTX_set_params(cctx, sparams)))
@@ -2736,6 +2749,61 @@ static int test_RSA_get_set_params(void)
     BN_free(n);
     BN_free(e);
     BN_free(d);
+
+    return ret;
+}
+
+static int test_RSA_OAEP_set_get_params(void)
+{
+    int ret = 0;
+    EVP_PKEY *key = NULL;
+    EVP_PKEY_CTX *key_ctx = NULL;
+
+    if (nullprov != NULL)
+        return TEST_skip("Test does not support a non-default library context");
+
+    if (!TEST_ptr(key = load_example_rsa_key())
+        || !TEST_ptr(key_ctx = EVP_PKEY_CTX_new_from_pkey(0, key, 0)))
+        goto err;
+
+    {
+        int padding = RSA_PKCS1_OAEP_PADDING;
+        OSSL_PARAM params[4];
+
+        params[0] = OSSL_PARAM_construct_int(OSSL_SIGNATURE_PARAM_PAD_MODE, &padding);
+        params[1] = OSSL_PARAM_construct_utf8_string(OSSL_ASYM_CIPHER_PARAM_OAEP_DIGEST,
+                                                     OSSL_DIGEST_NAME_SHA2_256, 0);
+        params[2] = OSSL_PARAM_construct_utf8_string(OSSL_ASYM_CIPHER_PARAM_MGF1_DIGEST,
+                                                     OSSL_DIGEST_NAME_SHA1, 0);
+        params[3] = OSSL_PARAM_construct_end();
+
+        if (!TEST_int_gt(EVP_PKEY_encrypt_init_ex(key_ctx, params),0))
+            goto err;
+    }
+    {
+        OSSL_PARAM params[3];
+        char oaepmd[30] = { '\0' };
+        char mgf1md[30] = { '\0' };
+
+        params[0] = OSSL_PARAM_construct_utf8_string(OSSL_ASYM_CIPHER_PARAM_OAEP_DIGEST,
+                                                     oaepmd, sizeof(oaepmd));
+        params[1] = OSSL_PARAM_construct_utf8_string(OSSL_ASYM_CIPHER_PARAM_MGF1_DIGEST,
+                                                     mgf1md, sizeof(mgf1md));
+        params[2] = OSSL_PARAM_construct_end();
+
+        if (!TEST_true(EVP_PKEY_CTX_get_params(key_ctx, params)))
+            goto err;
+
+        if (!TEST_str_eq(oaepmd, OSSL_DIGEST_NAME_SHA2_256)
+            || !TEST_str_eq(mgf1md, OSSL_DIGEST_NAME_SHA1))
+            goto err;
+    }
+
+    ret = 1;
+
+ err:
+    EVP_PKEY_free(key);
+    EVP_PKEY_CTX_free(key_ctx);
 
     return ret;
 }
@@ -4278,7 +4346,7 @@ static int test_custom_md_meth(void)
      * library context in this test.
      */
     if (testctx != NULL)
-        return 1;
+        return TEST_skip("Non-default libctx");
 
     custom_md_init_called = custom_md_cleanup_called = 0;
 
@@ -4300,7 +4368,7 @@ static int test_custom_md_meth(void)
                /*
                 * Initing our custom md and then initing another md should
                 * result in the init and cleanup functions of the custom md
-                * from being called.
+                * being called.
                 */
             || !TEST_true(EVP_DigestInit_ex(mdctx, tmp, NULL))
             || !TEST_true(EVP_DigestInit_ex(mdctx, EVP_sha256(), NULL))
@@ -4314,6 +4382,88 @@ static int test_custom_md_meth(void)
  err:
     EVP_MD_CTX_free(mdctx);
     EVP_MD_meth_free(tmp);
+    return testresult;
+}
+
+typedef struct {
+        int data;
+} custom_ciph_ctx;
+
+static int custom_ciph_init_called = 0;
+static int custom_ciph_cleanup_called = 0;
+
+static int custom_ciph_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+                            const unsigned char *iv, int enc)
+{
+    custom_ciph_ctx *p = EVP_CIPHER_CTX_get_cipher_data(ctx);
+
+    if (p == NULL)
+        return 0;
+
+    custom_ciph_init_called++;
+    return 1;
+}
+
+static int custom_ciph_cleanup(EVP_CIPHER_CTX *ctx)
+{
+    custom_ciph_ctx *p = EVP_CIPHER_CTX_get_cipher_data(ctx);
+
+    if (p == NULL)
+        /* Nothing to do */
+        return 1;
+
+    custom_ciph_cleanup_called++;
+    return 1;
+}
+
+static int test_custom_ciph_meth(void)
+{
+    EVP_CIPHER_CTX *ciphctx = NULL;
+    EVP_CIPHER *tmp = NULL;
+    int testresult = 0;
+    int nid;
+
+    /*
+     * We are testing deprecated functions. We don't support a non-default
+     * library context in this test.
+     */
+    if (testctx != NULL)
+        return TEST_skip("Non-default libctx");
+
+    custom_ciph_init_called = custom_ciph_cleanup_called = 0;
+
+    nid = OBJ_create("1.3.6.1.4.1.16604.998866.2", "custom-ciph", "custom-ciph");
+    if (!TEST_int_ne(nid, NID_undef))
+        goto err;
+    tmp = EVP_CIPHER_meth_new(nid, 16, 16);
+    if (!TEST_ptr(tmp))
+        goto err;
+
+    if (!TEST_true(EVP_CIPHER_meth_set_init(tmp, custom_ciph_init))
+            || !TEST_true(EVP_CIPHER_meth_set_flags(tmp, EVP_CIPH_ALWAYS_CALL_INIT))
+            || !TEST_true(EVP_CIPHER_meth_set_cleanup(tmp, custom_ciph_cleanup))
+            || !TEST_true(EVP_CIPHER_meth_set_impl_ctx_size(tmp,
+                                                            sizeof(custom_ciph_ctx))))
+        goto err;
+
+    ciphctx = EVP_CIPHER_CTX_new();
+    if (!TEST_ptr(ciphctx)
+            /*
+             * Initing our custom cipher and then initing another cipher
+             * should result in the init and cleanup functions of the custom
+             * cipher being called.
+             */
+            || !TEST_true(EVP_CipherInit_ex(ciphctx, tmp, NULL, NULL, NULL, 1))
+            || !TEST_true(EVP_CipherInit_ex(ciphctx, EVP_aes_128_cbc(), NULL,
+                                            NULL, NULL, 1))
+            || !TEST_int_eq(custom_ciph_init_called, 1)
+            || !TEST_int_eq(custom_ciph_cleanup_called, 1))
+        goto err;
+
+    testresult = 1;
+ err:
+    EVP_CIPHER_CTX_free(ciphctx);
+    EVP_CIPHER_meth_free(tmp);
     return testresult;
 }
 
@@ -4473,11 +4623,13 @@ static int test_ecx_short_keys(int tst)
     EVP_PKEY *pkey;
 
 
-    pkey = EVP_PKEY_new_raw_private_key(ecxnids[tst], NULL, &ecxkeydata, 1);
+    pkey = EVP_PKEY_new_raw_private_key_ex(testctx, OBJ_nid2sn(ecxnids[tst]),
+                                           NULL, &ecxkeydata, 1);
     if (!TEST_ptr_null(pkey)) {
         EVP_PKEY_free(pkey);
         return 0;
     }
+
     return 1;
 }
 
@@ -4497,6 +4649,73 @@ const OPTIONS *test_get_options(void)
     };
     return options;
 }
+
+#ifndef OPENSSL_NO_EC
+/* Test that trying to sign with a public key errors out gracefully */
+static int test_ecx_not_private_key(int tst)
+{
+    EVP_PKEY *pkey = NULL;
+
+    const unsigned char msg[] = { 0x00, 0x01, 0x02, 0x03 };
+    int testresult = 0;
+    EVP_MD_CTX *ctx = NULL;
+    unsigned char *mac = NULL;
+    size_t maclen = 0;
+    unsigned char *pubkey;
+    size_t pubkeylen;
+
+    switch (keys[tst].type) {
+    case NID_X25519:
+    case NID_X448:
+        return TEST_skip("signing not supported for X25519/X448");
+    }
+
+    /* Check if this algorithm supports public keys */
+    if (keys[tst].pub == NULL)
+        return TEST_skip("no public key present");
+
+    pubkey = (unsigned char *)keys[tst].pub;
+    pubkeylen = strlen(keys[tst].pub);
+
+    pkey = EVP_PKEY_new_raw_public_key_ex(testctx, OBJ_nid2sn(keys[tst].type),
+                                          NULL, pubkey, pubkeylen);
+    if (!TEST_ptr(pkey))
+        goto err;
+
+    if (!TEST_ptr(ctx = EVP_MD_CTX_new()))
+        goto err;
+
+    if (EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey) != 1)
+        goto check_err;
+
+    if (EVP_DigestSign(ctx, NULL, &maclen, msg, sizeof(msg)) != 1)
+        goto check_err;
+
+    if (!TEST_ptr(mac = OPENSSL_malloc(maclen)))
+        goto err;
+
+    if (!TEST_int_eq(EVP_DigestSign(ctx, mac, &maclen, msg, sizeof(msg)), 0))
+        goto err;
+
+ check_err:
+    /*
+     * Currently only EVP_DigestSign will throw PROV_R_NOT_A_PRIVATE_KEY,
+     * but we relax the check to allow error also thrown by
+     * EVP_DigestSignInit and EVP_DigestSign.
+     */
+    if (ERR_GET_REASON(ERR_peek_error()) == PROV_R_NOT_A_PRIVATE_KEY) {
+        testresult = 1;
+        ERR_clear_error();
+    }
+
+ err:
+    EVP_MD_CTX_free(ctx);
+    OPENSSL_free(mac);
+    EVP_PKEY_free(pkey);
+
+    return testresult;
+}
+#endif /* OPENSSL_NO_EC */
 
 int setup_tests(void)
 {
@@ -4540,7 +4759,7 @@ int setup_tests(void)
 #ifndef OPENSSL_NO_EC
     ADD_ALL_TESTS(test_EC_keygen_with_enc, OSSL_NELEM(ec_encodings));
 #endif
-#if !defined(OPENSSL_NO_SM2) && !defined(FIPS_MODULE)
+#if !defined(OPENSSL_NO_SM2)
     ADD_TEST(test_EVP_SM2);
     ADD_TEST(test_EVP_SM2_verify);
 #endif
@@ -4572,6 +4791,7 @@ int setup_tests(void)
     ADD_TEST(test_DSA_priv_pub);
 #endif
     ADD_TEST(test_RSA_get_set_params);
+    ADD_TEST(test_RSA_OAEP_set_get_params);
 #if !defined(OPENSSL_NO_CHACHA) && !defined(OPENSSL_NO_POLY1305)
     ADD_TEST(test_decrypt_null_chunks);
 #endif
@@ -4615,6 +4835,7 @@ int setup_tests(void)
     ADD_ALL_TESTS(test_custom_pmeth, 12);
     ADD_TEST(test_evp_md_cipher_meth);
     ADD_TEST(test_custom_md_meth);
+    ADD_TEST(test_custom_ciph_meth);
 
 # ifndef OPENSSL_NO_DYNAMIC_ENGINE
     /* Tests only support the default libctx */
@@ -4630,6 +4851,10 @@ int setup_tests(void)
 #endif
 
     ADD_ALL_TESTS(test_ecx_short_keys, OSSL_NELEM(ecxnids));
+
+#ifndef OPENSSL_NO_EC
+    ADD_ALL_TESTS(test_ecx_not_private_key, OSSL_NELEM(keys));
+#endif
 
     return 1;
 }

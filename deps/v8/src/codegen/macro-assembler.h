@@ -5,7 +5,7 @@
 #ifndef V8_CODEGEN_MACRO_ASSEMBLER_H_
 #define V8_CODEGEN_MACRO_ASSEMBLER_H_
 
-#include "src/codegen/turbo-assembler.h"
+#include "src/codegen/macro-assembler-base.h"
 #include "src/execution/frames.h"
 #include "src/heap/heap.h"
 
@@ -82,25 +82,25 @@ static constexpr int kMaxCParameters = 256;
 
 class V8_NODISCARD FrameScope {
  public:
-  explicit FrameScope(TurboAssembler* tasm, StackFrame::Type type)
+  explicit FrameScope(MacroAssembler* masm, StackFrame::Type type)
       :
 #ifdef V8_CODE_COMMENTS
-        comment_(tasm, frame_name(type)),
+        comment_(masm, frame_name(type)),
 #endif
-        tasm_(tasm),
+        masm_(masm),
         type_(type),
-        old_has_frame_(tasm->has_frame()) {
-    tasm->set_has_frame(true);
+        old_has_frame_(masm->has_frame()) {
+    masm->set_has_frame(true);
     if (type != StackFrame::MANUAL && type_ != StackFrame::NO_FRAME_TYPE) {
-      tasm->EnterFrame(type);
+      masm->EnterFrame(type);
     }
   }
 
   ~FrameScope() {
     if (type_ != StackFrame::MANUAL && type_ != StackFrame::NO_FRAME_TYPE) {
-      tasm_->LeaveFrame(type_);
+      masm_->LeaveFrame(type_);
     }
-    tasm_->set_has_frame(old_has_frame_);
+    masm_->set_has_frame(old_has_frame_);
   }
 
  private:
@@ -125,7 +125,7 @@ class V8_NODISCARD FrameScope {
   Assembler::CodeComment comment_;
 #endif  // V8_CODE_COMMENTS
 
-  TurboAssembler* tasm_;
+  MacroAssembler* masm_;
   StackFrame::Type const type_;
   bool const old_has_frame_;
 };
@@ -136,10 +136,10 @@ class V8_NODISCARD FrameAndConstantPoolScope {
       : masm_(masm),
         type_(type),
         old_has_frame_(masm->has_frame()),
-        old_constant_pool_available_(v8_flags.enable_embedded_constant_pool &&
+        old_constant_pool_available_(V8_EMBEDDED_CONSTANT_POOL_BOOL &&
                                      masm->is_constant_pool_available()) {
     masm->set_has_frame(true);
-    if (v8_flags.enable_embedded_constant_pool) {
+    if (V8_EMBEDDED_CONSTANT_POOL_BOOL) {
       masm->set_constant_pool_available(true);
     }
     if (type_ != StackFrame::MANUAL && type_ != StackFrame::NO_FRAME_TYPE) {
@@ -150,7 +150,7 @@ class V8_NODISCARD FrameAndConstantPoolScope {
   ~FrameAndConstantPoolScope() {
     masm_->LeaveFrame(type_);
     masm_->set_has_frame(old_has_frame_);
-    if (v8_flags.enable_embedded_constant_pool) {
+    if (V8_EMBEDDED_CONSTANT_POOL_BOOL) {
       masm_->set_constant_pool_available(old_constant_pool_available_);
     }
   }
@@ -169,14 +169,14 @@ class V8_NODISCARD ConstantPoolUnavailableScope {
  public:
   explicit ConstantPoolUnavailableScope(Assembler* assembler)
       : assembler_(assembler),
-        old_constant_pool_available_(v8_flags.enable_embedded_constant_pool &&
+        old_constant_pool_available_(V8_EMBEDDED_CONSTANT_POOL_BOOL &&
                                      assembler->is_constant_pool_available()) {
-    if (v8_flags.enable_embedded_constant_pool) {
+    if (V8_EMBEDDED_CONSTANT_POOL_BOOL) {
       assembler->set_constant_pool_available(false);
     }
   }
   ~ConstantPoolUnavailableScope() {
-    if (v8_flags.enable_embedded_constant_pool) {
+    if (V8_EMBEDDED_CONSTANT_POOL_BOOL) {
       assembler_->set_constant_pool_available(old_constant_pool_available_);
     }
   }
@@ -198,7 +198,7 @@ class V8_NODISCARD AllowExternalCallThatCantCauseGC : public FrameScope {
 // scope object.
 class V8_NODISCARD NoRootArrayScope {
  public:
-  explicit NoRootArrayScope(TurboAssembler* masm)
+  explicit NoRootArrayScope(MacroAssembler* masm)
       : masm_(masm), old_value_(masm->root_array_available()) {
     masm->set_root_array_available(false);
   }
@@ -206,7 +206,7 @@ class V8_NODISCARD NoRootArrayScope {
   ~NoRootArrayScope() { masm_->set_root_array_available(old_value_); }
 
  private:
-  TurboAssembler* masm_;
+  MacroAssembler* masm_;
   bool old_value_;
 };
 

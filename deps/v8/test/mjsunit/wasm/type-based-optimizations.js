@@ -10,6 +10,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
 // (by inspecting the resulting graph).
 (function WasmTypedOptimizationsTest() {
   let builder = new WasmModuleBuilder();
+  builder.startRecGroup();
   let top = builder.addStruct([makeField(kWasmI32, true)]);
   let middle = builder.addStruct([makeField(kWasmI32, true),
                                   makeField(kWasmI64, false)],
@@ -22,6 +23,7 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
                                    makeField(kWasmI64, false),
                                    makeField(kWasmI64, false)],
                                   middle);
+  builder.endRecGroup();
 
   builder.addFunction("main", makeSig(
         [wasmRefType(bottom1), wasmRefType(bottom2)], [kWasmI32]))
@@ -33,11 +35,11 @@ d8.file.execute("test/mjsunit/wasm/wasm-module-builder.js");
         // while (true) {
         kExprLoop, kWasmVoid,
           // if (ref.test temp bottom1) {
-          kExprLocalGet, 2, kGCPrefix, kExprRefTest, bottom1,
+          kExprLocalGet, 2, kGCPrefix, kExprRefTestDeprecated, bottom1,
           kExprIf, kWasmVoid,
             // counter += ((bottom1) temp).field_2;
-            // TODO(manoskouk): Implement path-based type tracking so we can
-            // eliminate this check.
+            // Note: This cast should get optimized away with path-based type
+            // tracking.
             kExprLocalGet, 2, kGCPrefix, kExprRefCast, bottom1,
             kGCPrefix, kExprStructGet, bottom1, 2,
             kExprLocalGet, 3, kExprI32Add, kExprLocalSet, 3,

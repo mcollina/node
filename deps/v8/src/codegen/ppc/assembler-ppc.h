@@ -309,10 +309,9 @@ class Assembler : public AssemblerBase {
   static constexpr int kMovInstructionsNoConstantPool = 2;
   static constexpr int kTaggedLoadInstructions = 1;
 #endif
-  static constexpr int kMovInstructions =
-      v8_flags.enable_embedded_constant_pool.value()
-          ? kMovInstructionsConstantPool
-          : kMovInstructionsNoConstantPool;
+  static constexpr int kMovInstructions = V8_EMBEDDED_CONSTANT_POOL_BOOL
+                                              ? kMovInstructionsConstantPool
+                                              : kMovInstructionsNoConstantPool;
 
   static inline int encode_crbit(const CRegister& cr, enum CRBit crbit) {
     return ((cr.code() * CRWIDTH) + crbit);
@@ -622,7 +621,7 @@ class Assembler : public AssemblerBase {
 
   RegList* GetScratchRegisterList() { return &scratch_register_list_; }
   // ---------------------------------------------------------------------------
-  // Code generation
+  // InstructionStream generation
 
   // Insert the smallest number of nop instructions
   // possible to align the pc offset to a multiple
@@ -895,6 +894,8 @@ class Assembler : public AssemblerBase {
 
   void mulhw(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
   void mulhwu(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
+  void mulhd(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
+  void mulhdu(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
   void mulli(Register dst, Register src, const Operand& imm);
 
   void divw(Register dst, Register src1, Register src2, OEBit o = LeaveOE,
@@ -1382,7 +1383,7 @@ class Assembler : public AssemblerBase {
 
   bool is_trampoline_emitted() const { return trampoline_emitted_; }
 
-  // Code generation
+  // InstructionStream generation
   // The relocation writer's position is at least kGap bytes below the end of
   // the generated instructions. This is so that multi-instruction sequences do
   // not have to check for overflow. The same is true for writes of large
@@ -1569,7 +1570,7 @@ class V8_EXPORT_PRIVATE V8_NODISCARD UseScratchRegisterScope {
 
  private:
   friend class Assembler;
-  friend class TurboAssembler;
+  friend class MacroAssembler;
 
   Assembler* assembler_;
   RegList old_available_;

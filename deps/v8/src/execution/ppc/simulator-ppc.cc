@@ -155,6 +155,10 @@ void PPCDebugger::RedoBreakpoint() {
 }
 
 void PPCDebugger::Debug() {
+  if (v8_flags.correctness_fuzzer_suppressions) {
+    PrintF("Debugger disabled for differential fuzzing.\n");
+    return;
+  }
   intptr_t last_pc = -1;
   bool done = false;
 
@@ -2578,6 +2582,32 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
       // High 32 bits of the result is undefined,
       // Which is simulated here by adding random bits.
       alu_out = (alu_out >> 32) | 0x421000000000000;
+      set_register(rt, alu_out);
+      if (instr->Bit(0)) {  // RC bit set
+        SetCR0(static_cast<intptr_t>(alu_out));
+      }
+      break;
+    }
+    case MULHD: {
+      int rt = instr->RTValue();
+      int ra = instr->RAValue();
+      int rb = instr->RBValue();
+      int64_t ra_val = get_register(ra);
+      int64_t rb_val = get_register(rb);
+      int64_t alu_out = base::bits::SignedMulHigh64(ra_val, rb_val);
+      set_register(rt, alu_out);
+      if (instr->Bit(0)) {  // RC bit set
+        SetCR0(static_cast<intptr_t>(alu_out));
+      }
+      break;
+    }
+    case MULHDU: {
+      int rt = instr->RTValue();
+      int ra = instr->RAValue();
+      int rb = instr->RBValue();
+      uint64_t ra_val = get_register(ra);
+      uint64_t rb_val = get_register(rb);
+      uint64_t alu_out = base::bits::UnsignedMulHigh64(ra_val, rb_val);
       set_register(rt, alu_out);
       if (instr->Bit(0)) {  // RC bit set
         SetCR0(static_cast<intptr_t>(alu_out));
@@ -5222,6 +5252,31 @@ void Simulator::ExecuteGeneric(Instruction* instr) {
         else if (temp < kMinInt16)
           temp = kMinInt16;
         set_simd_register_by_lane<int16_t>(vrt, i, static_cast<int16_t>(temp));
+      }
+      break;
+    }
+    case VMSUMMBM: {
+      int vrt = instr->RTValue();
+      int vra = instr->RAValue();
+      int vrb = instr->RBValue();
+      int vrc = instr->RCValue();
+      FOR_EACH_LANE(i, int32_t) {
+        int8_t vra_1_val = get_simd_register_by_lane<int8_t>(vra, 4 * i),
+               vra_2_val = get_simd_register_by_lane<int8_t>(vra, (4 * i) + 1),
+               vra_3_val = get_simd_register_by_lane<int8_t>(vra, (4 * i) + 2),
+               vra_4_val = get_simd_register_by_lane<int8_t>(vra, (4 * i) + 3);
+        uint8_t vrb_1_val = get_simd_register_by_lane<uint8_t>(vrb, 4 * i),
+                vrb_2_val =
+                    get_simd_register_by_lane<uint8_t>(vrb, (4 * i) + 1),
+                vrb_3_val =
+                    get_simd_register_by_lane<uint8_t>(vrb, (4 * i) + 2),
+                vrb_4_val =
+                    get_simd_register_by_lane<uint8_t>(vrb, (4 * i) + 3);
+        int32_t vrc_val = get_simd_register_by_lane<int32_t>(vrc, i);
+        int32_t temp1 = vra_1_val * vrb_1_val, temp2 = vra_2_val * vrb_2_val,
+                temp3 = vra_3_val * vrb_3_val, temp4 = vra_4_val * vrb_4_val;
+        temp1 = temp1 + temp2 + temp3 + temp4 + vrc_val;
+        set_simd_register_by_lane<int32_t>(vrt, i, temp1);
       }
       break;
     }

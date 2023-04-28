@@ -168,7 +168,7 @@ void EmitLoad(InstructionSelector* selector, Node* node, InstructionCode opcode,
       selector->CanAddressRelativeToRootsRegister(m.ResolvedValue())) {
     ptrdiff_t const delta =
         g.GetIntegerConstantValue(index) +
-        TurboAssemblerBase::RootRegisterOffsetForExternalReference(
+        MacroAssemblerBase::RootRegisterOffsetForExternalReference(
             selector->isolate(), m.ResolvedValue());
     // Check that the delta is a 32-bit integer due to the limitations of
     // immediate operands.
@@ -179,6 +179,13 @@ void EmitLoad(InstructionSelector* selector, Node* node, InstructionCode opcode,
                      g.UseImmediate(static_cast<int32_t>(delta)));
       return;
     }
+  }
+
+  if (base != nullptr && base->opcode() == IrOpcode::kLoadRootRegister) {
+    selector->Emit(opcode | AddressingModeField::encode(kMode_Root),
+                   g.DefineAsRegister(output == nullptr ? node : output),
+                   g.UseImmediate(index));
+    return;
   }
 
   if (g.CanBeImmediate(index, opcode)) {
@@ -280,10 +287,10 @@ void InstructionSelector::VisitLoad(Node* node) {
       opcode = kRiscvLoadDecompressTaggedSigned;
       break;
     case MachineRepresentation::kTaggedPointer:
-      opcode = kRiscvLoadDecompressTaggedPointer;
+      opcode = kRiscvLoadDecompressTagged;
       break;
     case MachineRepresentation::kTagged:
-      opcode = kRiscvLoadDecompressAnyTagged;
+      opcode = kRiscvLoadDecompressTagged;
       break;
 #else
     case MachineRepresentation::kTaggedSigned:   // Fall through.
@@ -326,7 +333,7 @@ void InstructionSelector::VisitStore(Node* node) {
 
   // TODO(riscv): I guess this could be done in a better way.
   if (write_barrier_kind != kNoWriteBarrier &&
-      V8_LIKELY(!FLAG_disable_write_barriers)) {
+      V8_LIKELY(!v8_flags.disable_write_barriers)) {
     DCHECK(CanBeTaggedPointer(rep));
     InstructionOperand inputs[3];
     size_t input_count = 0;
@@ -338,7 +345,7 @@ void InstructionSelector::VisitStore(Node* node) {
     InstructionOperand temps[] = {g.TempRegister(), g.TempRegister()};
     size_t const temp_count = arraysize(temps);
     InstructionCode code = kArchStoreWithWriteBarrier;
-    code |= MiscField::encode(static_cast<int>(record_write_mode));
+    code |= RecordWriteModeField::encode(record_write_mode);
     Emit(code, 0, nullptr, input_count, inputs, temp_count, temps);
   } else {
     ArchOpcode opcode;
@@ -387,17 +394,23 @@ void InstructionSelector::VisitStore(Node* node) {
         UNREACHABLE();
     }
 
+    if (base != nullptr && base->opcode() == IrOpcode::kLoadRootRegister) {
+      Emit(opcode | AddressingModeField::encode(kMode_Root), g.NoOutput(),
+           g.UseRegisterOrImmediateZero(value), g.UseImmediate(index));
+      return;
+    }
+
     if (g.CanBeImmediate(index, opcode)) {
       Emit(opcode | AddressingModeField::encode(kMode_MRI), g.NoOutput(),
-           g.UseRegister(base), g.UseImmediate(index),
-           g.UseRegisterOrImmediateZero(value));
+           g.UseRegisterOrImmediateZero(value), g.UseRegister(base),
+           g.UseImmediate(index));
     } else {
       InstructionOperand addr_reg = g.TempRegister();
       Emit(kRiscvAdd64 | AddressingModeField::encode(kMode_None), addr_reg,
            g.UseRegister(index), g.UseRegister(base));
       // Emit desired store opcode, using temp addr_reg.
       Emit(opcode | AddressingModeField::encode(kMode_MRI), g.NoOutput(),
-           addr_reg, g.TempImmediate(0), g.UseRegisterOrImmediateZero(value));
+           g.UseRegisterOrImmediateZero(value), addr_reg, g.TempImmediate(0));
     }
   }
 }
@@ -667,8 +680,16 @@ void InstructionSelector::VisitInt32MulHigh(Node* node) {
   VisitRRR(this, kRiscvMulHigh32, node);
 }
 
+void InstructionSelector::VisitInt64MulHigh(Node* node) {
+  VisitRRR(this, kRiscvMulHigh64, node);
+}
+
 void InstructionSelector::VisitUint32MulHigh(Node* node) {
   VisitRRR(this, kRiscvMulHighU32, node);
+}
+
+void InstructionSelector::VisitUint64MulHigh(Node* node) {
+  VisitRRR(this, kRiscvMulHighU64, node);
 }
 
 void InstructionSelector::VisitInt64Mul(Node* node) {
@@ -1441,7 +1462,7 @@ void VisitFullWord32Compare(InstructionSelector* selector, Node* node,
 void VisitOptimizedWord32Compare(InstructionSelector* selector, Node* node,
                                  InstructionCode opcode,
                                  FlagsContinuation* cont) {
-  if (FLAG_debug_code) {
+  if (v8_flags.debug_code) {
     RiscvOperandGenerator g(selector);
     InstructionOperand leftOp = g.TempRegister();
     InstructionOperand rightOp = g.TempRegister();
@@ -1610,6 +1631,18 @@ void InstructionSelector::VisitStackPointerGreaterThan(
                        temp_count, temps, cont);
 }
 
+bool CanCoverTrap(Node* user, Node* value) {
+  if (user->opcode() != IrOpcode::kTrapUnless &&
+      user->opcode() != IrOpcode::kTrapIf)
+    return true;
+  if (value->opcode() == IrOpcode::kWord32Equal ||
+      value->opcode() == IrOpcode::kInt32LessThanOrEqual ||
+      value->opcode() == IrOpcode::kInt32LessThanOrEqual ||
+      value->opcode() == IrOpcode::kUint32LessThan ||
+      value->opcode() == IrOpcode::kUint32LessThanOrEqual)
+    return false;
+  return true;
+}
 // Shared routine for word comparisons against zero.
 void InstructionSelector::VisitWordCompareZero(Node* user, Node* value,
                                                FlagsContinuation* cont) {
@@ -1632,7 +1665,7 @@ void InstructionSelector::VisitWordCompareZero(Node* user, Node* value,
     cont->Negate();
   }
 
-  if (CanCover(user, value)) {
+  if (CanCoverTrap(user, value) && CanCover(user, value)) {
     switch (value->opcode()) {
       case IrOpcode::kWord32Equal:
         cont->OverwriteAndNegateIfEqual(kEqual);
@@ -1808,6 +1841,21 @@ void InstructionSelector::VisitInt64SubWithOverflow(Node* node) {
   VisitBinop(this, node, kRiscvSubOvf64, &cont);
 }
 
+void InstructionSelector::VisitInt64MulWithOverflow(Node* node) {
+  if (Node* ovf = NodeProperties::FindProjection(node, 1)) {
+    // RISCV64 doesn't set the overflow flag for multiplication, so we need to
+    // test on kNotEqual. Here is the code sequence used:
+    //   mulh rdh, left, right
+    //   mul rdl, left, right
+    //   srai temp, rdl, 63
+    //   xor overflow, rdl, temp
+    FlagsContinuation cont = FlagsContinuation::ForSet(kNotEqual, ovf);
+    return VisitBinop(this, node, kRiscvMulOvf64, &cont);
+  }
+  FlagsContinuation cont;
+  VisitBinop(this, node, kRiscvMulOvf64, &cont);
+}
+
 void InstructionSelector::VisitWord64Equal(Node* const node) {
   FlagsContinuation cont = FlagsContinuation::ForSet(kEqual, node);
   Int64BinopMatcher m(node);
@@ -1903,10 +1951,10 @@ void InstructionSelector::VisitWord64AtomicLoad(Node* node) {
       opcode = kRiscv64LdDecompressTaggedSigned;
       break;
     case MachineRepresentation::kTaggedPointer:
-      opcode = kRiscv64LdDecompressTaggedPointer;
+      opcode = kRiscv64LdDecompressTagged;
       break;
     case MachineRepresentation::kTagged:
-      opcode = kRiscv64LdDecompressAnyTagged;
+      opcode = kRiscv64LdDecompressTagged;
       break;
 #else
     case MachineRepresentation::kTaggedSigned:   // Fall through.

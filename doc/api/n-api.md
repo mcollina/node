@@ -37,7 +37,7 @@ Node-API is a C API that ensures ABI stability across Node.js versions
 and different compiler levels. A C++ API can be easier to use.
 To support using C++, the project maintains a
 C++ wrapper module called [`node-addon-api`][].
-This wrapper provides an inlineable C++ API. Binaries built
+This wrapper provides an inlinable C++ API. Binaries built
 with `node-addon-api` will depend on the symbols for the Node-API C-based
 functions exported by Node.js. `node-addon-api` is a more
 efficient way to write code that calls Node-API. Take, for example, the
@@ -80,7 +80,8 @@ for `node-addon-api`.
 
 The [Node-API Resource](https://nodejs.github.io/node-addon-examples/) offers
 an excellent orientation and tips for developers just getting started with
-Node-API and `node-addon-api`.
+Node-API and `node-addon-api`. Additional media resources can be found on the
+[Node-API Media][] page.
 
 ## Implications of ABI stability
 
@@ -477,11 +478,11 @@ may be called multiple times, from multiple contexts, and even concurrently from
 multiple threads.
 
 Native addons may need to allocate global state which they use during
-their entire life cycle such that the state must be unique to each instance of
-the addon.
+their life cycle of an Node.js environment such that the state can be
+unique to each instance of the addon.
 
-To this end, Node-API provides a way to allocate data such that its life cycle
-is tied to the life cycle of the Agent.
+To this end, Node-API provides a way to associate data such that its life cycle
+is tied to the life cycle of a Node.js environment.
 
 ### `napi_set_instance_data`
 
@@ -509,11 +510,11 @@ napi_status napi_set_instance_data(napi_env env,
 
 Returns `napi_ok` if the API succeeded.
 
-This API associates `data` with the currently running Agent. `data` can later
-be retrieved using `napi_get_instance_data()`. Any existing data associated with
-the currently running Agent which was set by means of a previous call to
-`napi_set_instance_data()` will be overwritten. If a `finalize_cb` was provided
-by the previous call, it will not be called.
+This API associates `data` with the currently running Node.js environment. `data`
+can later be retrieved using `napi_get_instance_data()`. Any existing data
+associated with the currently running Node.js environment which was set by means
+of a previous call to `napi_set_instance_data()` will be overwritten. If a
+`finalize_cb` was provided by the previous call, it will not be called.
 
 ### `napi_get_instance_data`
 
@@ -531,17 +532,17 @@ napi_status napi_get_instance_data(napi_env env,
 
 * `[in] env`: The environment that the Node-API call is invoked under.
 * `[out] data`: The data item that was previously associated with the currently
-  running Agent by a call to `napi_set_instance_data()`.
+  running Node.js environment by a call to `napi_set_instance_data()`.
 
 Returns `napi_ok` if the API succeeded.
 
 This API retrieves data that was previously associated with the currently
-running Agent via `napi_set_instance_data()`. If no data is set, the call will
-succeed and `data` will be set to `NULL`.
+running Node.js environment via `napi_set_instance_data()`. If no data is set,
+the call will succeed and `data` will be set to `NULL`.
 
 ## Basic Node-API data types
 
-Node-API exposes the following fundamental datatypes as abstractions that are
+Node-API exposes the following fundamental data types as abstractions that are
 consumed by the various APIs. These APIs should be treated as opaque,
 introspectable only with other Node-API calls.
 
@@ -579,6 +580,7 @@ typedef enum {
   napi_arraybuffer_expected,
   napi_detachable_arraybuffer_expected,
   napi_would_deadlock,  /* unused */
+  napi_no_external_buffers_allowed
 } napi_status;
 ```
 
@@ -731,13 +733,13 @@ napiVersion: 8
 -->
 
 A 128-bit value stored as two unsigned 64-bit integers. It serves as a UUID
-with which JavaScript objects can be "tagged" in order to ensure that they are
-of a certain type. This is a stronger check than [`napi_instanceof`][], because
-the latter can report a false positive if the object's prototype has been
-manipulated. Type-tagging is most useful in conjunction with [`napi_wrap`][]
-because it ensures that the pointer retrieved from a wrapped object can be
-safely cast to the native type corresponding to the type tag that had been
-previously applied to the JavaScript object.
+with which JavaScript objects or [externals][] can be "tagged" in order to
+ensure that they are of a certain type. This is a stronger check than
+[`napi_instanceof`][], because the latter can report a false positive if the
+object's prototype has been manipulated. Type-tagging is most useful in
+conjunction with [`napi_wrap`][] because it ensures that the pointer retrieved
+from a wrapped object can be safely cast to the native type corresponding to the
+type tag that had been previously applied to the JavaScript object.
 
 ```c
 typedef struct {
@@ -896,6 +898,26 @@ typedef void (*napi_threadsafe_function_call_js)(napi_env env,
 
 Unless for reasons discussed in [Object Lifetime Management][], creating a
 handle and/or callback scope inside the function body is not necessary.
+
+#### `napi_cleanup_hook`
+
+<!-- YAML
+added:
+  - v19.2.0
+  - v18.13.0
+napiVersion: 3
+-->
+
+Function pointer used with [`napi_add_env_cleanup_hook`][]. It will be called
+when the environment is being torn down.
+
+Callback functions must satisfy the following signature:
+
+```c
+typedef void (*napi_cleanup_hook)(void* data);
+```
+
+* `[in] data`: The data that was passed to [`napi_add_env_cleanup_hook`][].
 
 #### `napi_async_cleanup_hook`
 
@@ -1779,11 +1801,11 @@ If still valid, this API returns the `napi_value` representing the
 JavaScript `Object` associated with the `napi_ref`. Otherwise, result
 will be `NULL`.
 
-### Cleanup on exit of the current Node.js instance
+### Cleanup on exit of the current Node.js environment
 
 While a Node.js process typically releases all its resources when exiting,
 embedders of Node.js, or future Worker support, may require addons to register
-clean-up hooks that will be run once the current Node.js instance exits.
+clean-up hooks that will be run once the current Node.js environment exits.
 
 Node-API provides functions for registering and un-registering such callbacks.
 When those callbacks are run, all resources that are being held by the addon
@@ -1798,7 +1820,7 @@ napiVersion: 3
 
 ```c
 NODE_EXTERN napi_status napi_add_env_cleanup_hook(napi_env env,
-                                                  void (*fun)(void* arg),
+                                                  napi_cleanup_hook fun,
                                                   void* arg);
 ```
 
@@ -1908,6 +1930,22 @@ Unregisters the cleanup hook corresponding to `remove_handle`. This will prevent
 the hook from being executed, unless it has already started executing.
 This must be called on any `napi_async_cleanup_hook_handle` value obtained
 from [`napi_add_async_cleanup_hook`][].
+
+### Finalization on the exit of the Node.js environment
+
+The Node.js environment may be torn down at an arbitrary time as soon as
+possible with JavaScript execution disallowed, like on the request of
+[`worker.terminate()`][]. When the environment is being torn down, the
+registered `napi_finalize` callbacks of JavaScript objects, Thread-safe
+functions and environment instance data are invoked immediately and
+independently.
+
+The invocation of `napi_finalize` callbacks are scheduled after the manually
+registered cleanup hooks. In order to ensure a proper order of addon
+finalization during environment shutdown to avoid use-after-free in the
+`napi_finalize` callback, addons should register a cleanup hook with
+`napi_add_env_cleanup_hook` and `napi_add_async_cleanup_hook` to manually
+release the allocated resource in a proper order.
 
 ## Module registration
 
@@ -2363,12 +2401,7 @@ is used to pass external data through JavaScript code, so it can be retrieved
 later by native code using [`napi_get_value_external`][].
 
 The API adds a `napi_finalize` callback which will be called when the JavaScript
-object just created is ready for garbage collection. It is similar to
-`napi_wrap()` except that:
-
-* the native data cannot be retrieved later using `napi_unwrap()`,
-* nor can it be removed later using `napi_remove_wrap()`, and
-* the object created by the API can be used with `napi_wrap()`.
+object just created has been garbage collected.
 
 The created value is not an object, and therefore does not support additional
 properties. It is considered a distinct value type: calling `napi_typeof()` with
@@ -2403,18 +2436,26 @@ napi_create_external_arraybuffer(napi_env env,
 
 Returns `napi_ok` if the API succeeded.
 
+**Some runtimes other than Node.js have dropped support for external buffers**.
+On runtimes other than Node.js this method may return
+`napi_no_external_buffers_allowed` to indicate that external
+buffers are not supported. One such runtime is Electron as
+described in this issue
+[electron/issues/35801](https://github.com/electron/electron/issues/35801).
+
+In order to maintain broadest compatibility with all runtimes
+you may define `NODE_API_NO_EXTERNAL_BUFFERS_ALLOWED` in your addon before
+includes for the node-api headers. Doing so will hide the 2 functions
+that create external buffers. This will ensure a compilation error
+occurs if you accidentally use one of these methods.
+
 This API returns a Node-API value corresponding to a JavaScript `ArrayBuffer`.
 The underlying byte buffer of the `ArrayBuffer` is externally allocated and
 managed. The caller must ensure that the byte buffer remains valid until the
 finalize callback is called.
 
 The API adds a `napi_finalize` callback which will be called when the JavaScript
-object just created is ready for garbage collection. It is similar to
-`napi_wrap()` except that:
-
-* the native data cannot be retrieved later using `napi_unwrap()`,
-* nor can it be removed later using `napi_remove_wrap()`, and
-* the object created by the API can be used with `napi_wrap()`.
+object just created has been garbage collected.
 
 JavaScript `ArrayBuffer`s are described in
 [Section 24.1][] of the ECMAScript Language Specification.
@@ -2447,17 +2488,25 @@ napi_status napi_create_external_buffer(napi_env env,
 
 Returns `napi_ok` if the API succeeded.
 
+**Some runtimes other than Node.js have dropped support for external buffers**.
+On runtimes other than Node.js this method may return
+`napi_no_external_buffers_allowed` to indicate that external
+buffers are not supported. One such runtime is Electron as
+described in this issue
+[electron/issues/35801](https://github.com/electron/electron/issues/35801).
+
+In order to maintain broadest compatibility with all runtimes
+you may define `NODE_API_NO_EXTERNAL_BUFFERS_ALLOWED` in your addon before
+includes for the node-api headers. Doing so will hide the 2 functions
+that create external buffers. This will ensure a compilation error
+occurs if you accidentally use one of these methods.
+
 This API allocates a `node::Buffer` object and initializes it with data
 backed by the passed in buffer. While this is still a fully-supported data
 structure, in most cases using a `TypedArray` will suffice.
 
 The API adds a `napi_finalize` callback which will be called when the JavaScript
-object just created is ready for garbage collection. It is similar to
-`napi_wrap()` except that:
-
-* the native data cannot be retrieved later using `napi_unwrap()`,
-* nor can it be removed later using `napi_remove_wrap()`, and
-* the object created by the API can be used with `napi_wrap()`.
+object just created has been garbage collected.
 
 For Node.js >=4 `Buffers` are `Uint8Array`s.
 
@@ -3973,7 +4022,7 @@ reasons. Consider the following JavaScript:
 const obj = {};
 Object.defineProperties(obj, {
   'foo': { value: 123, writable: true, configurable: true, enumerable: true },
-  'bar': { value: 456, writable: true, configurable: true, enumerable: true }
+  'bar': { value: 456, writable: true, configurable: true, enumerable: true },
 });
 ```
 
@@ -4920,7 +4969,7 @@ To this end, Node-API provides type-tagging capabilities.
 
 A type tag is a 128-bit integer unique to the addon. Node-API provides the
 `napi_type_tag` structure for storing a type tag. When such a value is passed
-along with a JavaScript object stored in a `napi_value` to
+along with a JavaScript object or [external][] stored in a `napi_value` to
 `napi_type_tag_object()`, the JavaScript object will be "marked" with the
 type tag. The "mark" is invisible on the JavaScript side. When a JavaScript
 object arrives into a native binding, `napi_check_object_type_tag()` can be used
@@ -5096,7 +5145,7 @@ napi_status napi_wrap(napi_env env,
 * `[in] native_object`: The native instance that will be wrapped in the
   JavaScript object.
 * `[in] finalize_cb`: Optional native callback that can be used to free the
-  native instance when the JavaScript object is ready for garbage-collection.
+  native instance when the JavaScript object has been garbage-collected.
   [`napi_finalize`][] provides more details.
 * `[in] finalize_hint`: Optional contextual hint that is passed to the
   finalize callback.
@@ -5206,15 +5255,15 @@ napi_status napi_type_tag_object(napi_env env,
 ```
 
 * `[in] env`: The environment that the API is invoked under.
-* `[in] js_object`: The JavaScript object to be marked.
+* `[in] js_object`: The JavaScript object or [external][] to be marked.
 * `[in] type_tag`: The tag with which the object is to be marked.
 
 Returns `napi_ok` if the API succeeded.
 
-Associates the value of the `type_tag` pointer with the JavaScript object.
-`napi_check_object_type_tag()` can then be used to compare the tag that was
-attached to the object with one owned by the addon to ensure that the object
-has the right type.
+Associates the value of the `type_tag` pointer with the JavaScript object or
+[external][]. `napi_check_object_type_tag()` can then be used to compare the tag
+that was attached to the object with one owned by the addon to ensure that the
+object has the right type.
 
 If the object already has an associated type tag, this API will return
 `napi_invalid_arg`.
@@ -5236,7 +5285,8 @@ napi_status napi_check_object_type_tag(napi_env env,
 ```
 
 * `[in] env`: The environment that the API is invoked under.
-* `[in] js_object`: The JavaScript object whose type tag to examine.
+* `[in] js_object`: The JavaScript object or [external][] whose type tag to
+  examine.
 * `[in] type_tag`: The tag with which to compare any tag found on the object.
 * `[out] result`: Whether the type tag given matched the type tag on the
   object. `false` is also returned if no type tag was found on the object.
@@ -5258,7 +5308,7 @@ napiVersion: 5
 ```c
 napi_status napi_add_finalizer(napi_env env,
                                napi_value js_object,
-                               void* native_object,
+                               void* finalize_data,
                                napi_finalize finalize_cb,
                                void* finalize_hint,
                                napi_ref* result);
@@ -5267,10 +5317,9 @@ napi_status napi_add_finalizer(napi_env env,
 * `[in] env`: The environment that the API is invoked under.
 * `[in] js_object`: The JavaScript object to which the native data will be
   attached.
-* `[in] native_object`: The native data that will be attached to the JavaScript
-  object.
+* `[in] finalize_data`: Optional data to be passed to `finalize_cb`.
 * `[in] finalize_cb`: Native callback that will be used to free the
-  native data when the JavaScript object is ready for garbage-collection.
+  native data when the JavaScript object has been garbage-collected.
   [`napi_finalize`][] provides more details.
 * `[in] finalize_hint`: Optional contextual hint that is passed to the
   finalize callback.
@@ -5279,14 +5328,9 @@ napi_status napi_add_finalizer(napi_env env,
 Returns `napi_ok` if the API succeeded.
 
 Adds a `napi_finalize` callback which will be called when the JavaScript object
-in `js_object` is ready for garbage collection. This API is similar to
-`napi_wrap()` except that:
+in `js_object` has been garbage-collected.
 
-* the native data cannot be retrieved later using `napi_unwrap()`,
-* nor can it be removed later using `napi_remove_wrap()`, and
-* the API can be called multiple times with different data items in order to
-  attach each of them to the JavaScript object, and
-* the object manipulated by the API can be used with `napi_wrap()`.
+This API can be called multiple times on a single JavaScript object.
 
 _Caution_: The optional returned reference (if obtained) should be deleted via
 [`napi_delete_reference`][] ONLY in response to the finalize callback
@@ -6307,6 +6351,7 @@ the add-on's file name during loading.
 [GitHub releases]: https://help.github.com/en/github/administering-a-repository/about-releases
 [LLVM]: https://llvm.org
 [Native Abstractions for Node.js]: https://github.com/nodejs/nan
+[Node-API Media]: https://github.com/nodejs/abi-stable-node/blob/HEAD/node-api-media.md
 [Object lifetime management]: #object-lifetime-management
 [Object wrap]: #object-wrap
 [Section 12.10.4]: https://tc39.github.io/ecma262/#sec-instanceofoperator
@@ -6407,9 +6452,12 @@ the add-on's file name during loading.
 [`process.release`]: process.md#processrelease
 [`uv_ref`]: https://docs.libuv.org/en/v1.x/handle.html#c.uv_ref
 [`uv_unref`]: https://docs.libuv.org/en/v1.x/handle.html#c.uv_unref
+[`worker.terminate()`]: worker_threads.md#workerterminate
 [async_hooks `type`]: async_hooks.md#type
 [context-aware addons]: addons.md#context-aware-addons
 [docs]: https://github.com/nodejs/node-addon-api#api-documentation
+[external]: #napi_create_external
+[externals]: #napi_create_external
 [global scope]: globals.md
 [gyp-next]: https://github.com/nodejs/gyp-next
 [module scope]: modules.md#the-module-scope

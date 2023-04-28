@@ -98,7 +98,11 @@ void RecordStatus(Isolate* isolate, AllocationStatus status) {
 }
 
 inline void DebugCheckZero(void* start, size_t byte_length) {
-#if DEBUG
+#ifdef DEBUG
+#ifdef V8_IS_TSAN
+  // TSan in debug mode is particularly slow. Skip this check for buffers >64MB.
+  if (byte_length > 64 * MB) return;
+#endif  // TSan debug build
   // Double check memory is zero-initialized. Despite being DEBUG-only,
   // this function is somewhat optimized for the benefit of test suite
   // execution times (some tests allocate several gigabytes).
@@ -135,6 +139,21 @@ void BackingStore::Clear() {
   type_specific_data_.v8_api_array_buffer_allocator = nullptr;
 }
 
+void BackingStore::FreeResizableMemory() {
+  DCHECK(free_on_destruct_);
+  DCHECK(!custom_deleter_);
+  DCHECK(is_resizable_by_js_ || is_wasm_memory_);
+  auto region =
+      GetReservedRegion(has_guard_regions_, buffer_start_, byte_capacity_);
+
+  PageAllocator* page_allocator = GetArrayBufferPageAllocator();
+  if (!region.is_empty()) {
+    FreePages(page_allocator, reinterpret_cast<void*>(region.begin()),
+              region.size());
+  }
+  Clear();
+}
+
 BackingStore::BackingStore(void* buffer_start, size_t byte_length,
                            size_t max_byte_length, size_t byte_capacity,
                            SharedFlag shared, ResizableFlag resizable,
@@ -147,7 +166,7 @@ BackingStore::BackingStore(void* buffer_start, size_t byte_length,
       byte_capacity_(byte_capacity),
       id_(next_backing_store_id_.fetch_add(1)),
       is_shared_(shared == SharedFlag::kShared),
-      is_resizable_(resizable == ResizableFlag::kResizable),
+      is_resizable_by_js_(resizable == ResizableFlag::kResizable),
       is_wasm_memory_(is_wasm_memory),
       holds_shared_ptr_to_allocator_(false),
       free_on_destruct_(free_on_destruct),
@@ -156,10 +175,10 @@ BackingStore::BackingStore(void* buffer_start, size_t byte_length,
       custom_deleter_(custom_deleter),
       empty_deleter_(empty_deleter) {
   // TODO(v8:11111): RAB / GSAB - Wasm integration.
-  DCHECK_IMPLIES(is_wasm_memory_, !is_resizable_);
-  DCHECK_IMPLIES(is_resizable_, !custom_deleter_);
-  DCHECK_IMPLIES(is_resizable_, free_on_destruct_);
-  DCHECK_IMPLIES(!is_wasm_memory && !is_resizable_,
+  DCHECK_IMPLIES(is_wasm_memory_, !is_resizable_by_js_);
+  DCHECK_IMPLIES(is_resizable_by_js_, !custom_deleter_);
+  DCHECK_IMPLIES(is_resizable_by_js_, free_on_destruct_);
+  DCHECK_IMPLIES(!is_wasm_memory && !is_resizable_by_js_,
                  byte_length_ == max_byte_length_);
   DCHECK_GE(max_byte_length_, byte_length_);
   DCHECK_GE(byte_capacity_, max_byte_length_);
@@ -173,14 +192,10 @@ BackingStore::~BackingStore() {
     return;
   }
 
-  PageAllocator* page_allocator = GetArrayBufferPageAllocator();
-
 #if V8_ENABLE_WEBASSEMBLY
   if (is_wasm_memory_) {
     // TODO(v8:11111): RAB / GSAB - Wasm integration.
-    DCHECK(!is_resizable_);
-    DCHECK(free_on_destruct_);
-    DCHECK(!custom_deleter_);
+    DCHECK(!is_resizable_by_js_);
     size_t reservation_size =
         GetReservationSize(has_guard_regions_, byte_capacity_);
     TRACE_BS(
@@ -192,31 +207,14 @@ BackingStore::~BackingStore() {
       delete shared_data;
       type_specific_data_.shared_wasm_memory_data = nullptr;
     }
-
     // Wasm memories are always allocated through the page allocator.
-    auto region =
-        GetReservedRegion(has_guard_regions_, buffer_start_, byte_capacity_);
-
-    if (!region.is_empty()) {
-      FreePages(page_allocator, reinterpret_cast<void*>(region.begin()),
-                region.size());
-    }
-    Clear();
+    FreeResizableMemory();
     return;
   }
 #endif  // V8_ENABLE_WEBASSEMBLY
 
-  if (is_resizable_) {
-    DCHECK(free_on_destruct_);
-    DCHECK(!custom_deleter_);
-    auto region =
-        GetReservedRegion(has_guard_regions_, buffer_start_, byte_capacity_);
-
-    if (!region.is_empty()) {
-      FreePages(page_allocator, reinterpret_cast<void*>(region.begin()),
-                region.size());
-    }
-    Clear();
+  if (is_resizable_by_js_) {
+    FreeResizableMemory();
     return;
   }
   if (custom_deleter_) {
@@ -280,6 +278,14 @@ std::unique_ptr<BackingStore> BackingStore::Allocate(
       counters->array_buffer_new_size_failures()->AddSample(mb_length);
       return {};
     }
+#ifdef V8_ENABLE_SANDBOX
+    // Check to catch use of a non-sandbox-compatible ArrayBufferAllocator.
+    CHECK_WITH_MSG(GetProcessWideSandbox()->Contains(buffer_start),
+                   "When the V8 Sandbox is enabled, ArrayBuffer backing stores "
+                   "must be allocated inside the sandbox address space. Please "
+                   "use an appropriate ArrayBuffer::Allocator to allocate "
+                   "these buffers, or disable the sandbox.");
+#endif
   }
 
   auto result = new BackingStore(buffer_start,                  // start
@@ -345,8 +351,10 @@ std::unique_ptr<BackingStore> BackingStore::TryAllocateAndPartiallyCommitMemory(
       // Collect garbage and retry.
       did_retry = true;
       // TODO(wasm): try Heap::EagerlyFreeExternalMemory() first?
-      isolate->heap()->MemoryPressureNotification(
-          MemoryPressureLevel::kCritical, true);
+      if (isolate != nullptr) {
+        isolate->heap()->MemoryPressureNotification(
+            MemoryPressureLevel::kCritical, true);
+      }
     }
     return false;
   };
@@ -366,7 +374,9 @@ std::unique_ptr<BackingStore> BackingStore::TryAllocateAndPartiallyCommitMemory(
   };
   if (!gc_retry(allocate_pages)) {
     // Page allocator could not reserve enough pages.
-    RecordStatus(isolate, AllocationStatus::kOtherFailure);
+    if (isolate != nullptr) {
+      RecordStatus(isolate, AllocationStatus::kOtherFailure);
+    }
     TRACE_BS("BSw:try   failed to allocate pages\n");
     return {};
   }
@@ -401,8 +411,10 @@ std::unique_ptr<BackingStore> BackingStore::TryAllocateAndPartiallyCommitMemory(
 
   DebugCheckZero(buffer_start, byte_length);  // touch the bytes.
 
-  RecordStatus(isolate, did_retry ? AllocationStatus::kSuccessAfterRetry
-                                  : AllocationStatus::kSuccess);
+  if (isolate != nullptr) {
+    RecordStatus(isolate, did_retry ? AllocationStatus::kSuccessAfterRetry
+                                    : AllocationStatus::kSuccess);
+  }
 
   const bool is_wasm_memory = wasm_memory != WasmMemoryFlag::kNotWasm;
   ResizableFlag resizable =

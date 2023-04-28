@@ -2,7 +2,11 @@
 
 <!-- YAML
 changes:
-  - version: REPLACEME
+  - version: v20.0.0
+    pr-url: https://github.com/nodejs/node/pull/46067
+    description: Arguments are now coerced and validated as per their WebIDL
+      definitions like in other Web Crypto API implementations.
+  - version: v19.0.0
     pr-url: https://github.com/nodejs/node/pull/44897
     description: No longer experimental except for the `Ed25519`, `Ed448`,
       `X25519`, and `X448` algorithms.
@@ -54,14 +58,14 @@ const { subtle } = globalThis.crypto;
   const key = await subtle.generateKey({
     name: 'HMAC',
     hash: 'SHA-256',
-    length: 256
+    length: 256,
   }, true, ['sign', 'verify']);
 
   const enc = new TextEncoder();
   const message = enc.encode('I love cupcakes');
 
   const digest = await subtle.sign({
-    name: 'HMAC'
+    name: 'HMAC',
   }, key, message);
 
 })();
@@ -82,7 +86,7 @@ const { subtle } = globalThis.crypto;
 async function generateAesKey(length = 256) {
   const key = await subtle.generateKey({
     name: 'AES-CBC',
-    length
+    length,
   }, true, ['encrypt', 'decrypt']);
 
   return key;
@@ -97,7 +101,7 @@ const { subtle } = globalThis.crypto;
 async function generateEcKey(namedCurve = 'P-521') {
   const {
     publicKey,
-    privateKey
+    privateKey,
   } = await subtle.generateKey({
     name: 'ECDSA',
     namedCurve,
@@ -135,7 +139,7 @@ const { subtle } = globalThis.crypto;
 async function generateHmacKey(hash = 'SHA-256') {
   const key = await subtle.generateKey({
     name: 'HMAC',
-    hash
+    hash,
   }, true, ['sign', 'verify']);
 
   return key;
@@ -151,7 +155,7 @@ const publicExponent = new Uint8Array([1, 0, 1]);
 async function generateRsaKey(modulusLength = 2048, hash = 'SHA-256') {
   const {
     publicKey,
-    privateKey
+    privateKey,
   } = await subtle.generateKey({
     name: 'RSASSA-PKCS1-v1_5',
     modulusLength,
@@ -181,7 +185,7 @@ async function aesEncrypt(plaintext) {
   return {
     key,
     iv,
-    ciphertext
+    ciphertext,
   };
 }
 
@@ -204,7 +208,7 @@ const { subtle } = globalThis.crypto;
 async function generateAndExportHmacKey(format = 'jwk', hash = 'SHA-512') {
   const key = await subtle.generateKey({
     name: 'HMAC',
-    hash
+    hash,
   }, true, ['sign', 'verify']);
 
   return subtle.exportKey(format, key);
@@ -213,7 +217,7 @@ async function generateAndExportHmacKey(format = 'jwk', hash = 'SHA-512') {
 async function importHmacKey(keyData, format = 'jwk', hash = 'SHA-512') {
   const key = await subtle.importKey(format, keyData, {
     name: 'HMAC',
-    hash
+    hash,
   }, true, ['sign', 'verify']);
 
   return key;
@@ -231,11 +235,11 @@ async function generateAndWrapHmacKey(format = 'jwk', hash = 'SHA-512') {
     wrappingKey,
   ] = await Promise.all([
     subtle.generateKey({
-      name: 'HMAC', hash
+      name: 'HMAC', hash,
     }, true, ['sign', 'verify']),
     subtle.generateKey({
       name: 'AES-KW',
-      length: 256
+      length: 256,
     }, true, ['wrapKey', 'unwrapKey']),
   ]);
 
@@ -304,7 +308,7 @@ async function pbkdf2(pass, salt, iterations = 1000, length = 256) {
     name: 'PBKDF2',
     hash: 'SHA-512',
     salt: ec.encode(salt),
-    iterations
+    iterations,
   }, key, length);
   return bits;
 }
@@ -321,10 +325,10 @@ async function pbkdf2Key(pass, salt, iterations = 1000, length = 256) {
     name: 'PBKDF2',
     hash: 'SHA-512',
     salt: ec.encode(salt),
-    iterations
+    iterations,
   }, keyMaterial, {
     name: 'AES-GCM',
-    length: 256
+    length: 256,
   }, true, ['encrypt', 'decrypt']);
   return key;
 }
@@ -710,7 +714,7 @@ changes:
 
 * `format`: {string} Must be one of `'raw'`, `'pkcs8'`, `'spki'`, or `'jwk'`.
 * `key`: {CryptoKey}
-* Returns: {Promise} containing {ArrayBuffer}.
+* Returns: {Promise} containing {ArrayBuffer|Object}.
 
 Exports the given key into the specified format, if supported.
 
@@ -799,7 +803,7 @@ changes:
 -->
 
 * `format`: {string} Must be one of `'raw'`, `'pkcs8'`, `'spki'`, or `'jwk'`.
-* `keyData`: {ArrayBuffer|TypedArray|DataView|Buffer|KeyObject}
+* `keyData`: {ArrayBuffer|TypedArray|DataView|Buffer|Object}
 
 <!--lint disable maximum-line-length remark-lint-->
 
@@ -1589,7 +1593,7 @@ there is reason to use a different value, use `new Uint8Array([1, 0, 1])`
 added: v15.0.0
 -->
 
-#### rsaOaepParams.label
+#### `rsaOaepParams.label`
 
 <!-- YAML
 added: v15.0.0
@@ -1602,7 +1606,7 @@ to the generated ciphertext.
 
 The `rsaOaepParams.label` parameter is optional.
 
-#### rsaOaepParams.name
+#### `rsaOaepParams.name`
 
 <!-- YAML
 added: v15.0.0

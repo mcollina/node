@@ -252,8 +252,7 @@ TF_BUILTIN(FastNewClosure, ConstructorBuiltinsAssembler) {
   StoreObjectFieldNoWriteBarrier(result, JSFunction::kSharedFunctionInfoOffset,
                                  shared_function_info);
   StoreObjectFieldNoWriteBarrier(result, JSFunction::kContextOffset, context);
-  TNode<CodeT> lazy_builtin =
-      HeapConstant(BUILTIN_CODE(isolate(), CompileLazy));
+  TNode<Code> lazy_builtin = HeapConstant(BUILTIN_CODE(isolate(), CompileLazy));
   StoreObjectFieldNoWriteBarrier(result, JSFunction::kCodeOffset, lazy_builtin);
   Return(result);
 }
@@ -382,7 +381,7 @@ TNode<Context> ConstructorBuiltinsAssembler::FastNewFunctionContext(
       [=](TNode<IntPtrT> offset) {
         StoreObjectFieldNoWriteBarrier(function_context, offset, undefined);
       },
-      kTaggedSize, IndexAdvanceMode::kPost);
+      kTaggedSize, LoopUnrollingMode::kYes, IndexAdvanceMode::kPost);
   return function_context;
 }
 
@@ -596,13 +595,16 @@ TNode<HeapObject> ConstructorBuiltinsAssembler::CreateShallowObjectLiteral(
   static_assert(JSObject::kMaxInstanceSize < kMaxRegularHeapObjectSize);
   TNode<IntPtrT> instance_size =
       TimesTaggedSize(LoadMapInstanceSizeInWords(boilerplate_map));
+  TNode<IntPtrT> aligned_instance_size =
+      AlignToAllocationAlignment(instance_size);
   TNode<IntPtrT> allocation_size = instance_size;
   bool needs_allocation_memento = v8_flags.allocation_site_pretenuring;
   if (needs_allocation_memento) {
     DCHECK(V8_ALLOCATION_SITE_TRACKING_BOOL);
     // Prepare for inner-allocating the AllocationMemento.
-    allocation_size =
-        IntPtrAdd(instance_size, IntPtrConstant(AllocationMemento::kSize));
+    allocation_size = IntPtrAdd(aligned_instance_size,
+                                IntPtrConstant(ALIGN_TO_ALLOCATION_ALIGNMENT(
+                                    AllocationMemento::kSize)));
   }
 
   TNode<HeapObject> copy =
@@ -620,7 +622,7 @@ TNode<HeapObject> ConstructorBuiltinsAssembler::CreateShallowObjectLiteral(
   // Initialize the AllocationMemento before potential GCs due to heap number
   // allocation when copying the in-object properties.
   if (needs_allocation_memento) {
-    InitializeAllocationMemento(copy, instance_size, allocation_site);
+    InitializeAllocationMemento(copy, aligned_instance_size, allocation_site);
   }
 
   {
@@ -661,7 +663,7 @@ TNode<HeapObject> ConstructorBuiltinsAssembler::CreateShallowObjectLiteral(
             TNode<Object> field = LoadObjectField(boilerplate, offset);
             StoreObjectFieldNoWriteBarrier(copy, offset, field);
           },
-          kTaggedSize, IndexAdvanceMode::kPost);
+          kTaggedSize, LoopUnrollingMode::kYes, IndexAdvanceMode::kPost);
       CopyMutableHeapNumbersInObject(copy, offset.value(), instance_size);
       Goto(&done_init);
     }
@@ -711,7 +713,7 @@ void ConstructorBuiltinsAssembler::CopyMutableHeapNumbersInObject(
         }
         BIND(&continue_loop);
       },
-      kTaggedSize, IndexAdvanceMode::kPost);
+      kTaggedSize, LoopUnrollingMode::kNo, IndexAdvanceMode::kPost);
 }
 
 }  // namespace internal

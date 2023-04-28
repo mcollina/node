@@ -207,7 +207,7 @@ A [`TypeError`][] is thrown if `path` is not a string.
 <!-- YAML
 added: v0.11.15
 changes:
-  - version: REPLACEME
+  - version: v19.0.0
     pr-url: https://github.com/nodejs/node/pull/44349
     description: The dot will be added if it is not specified in `ext`.
 -->
@@ -238,7 +238,7 @@ For example, on POSIX:
 path.format({
   root: '/ignored',
   dir: '/home/user/dir',
-  base: 'file.txt'
+  base: 'file.txt',
 });
 // Returns: '/home/user/dir/file.txt'
 
@@ -248,7 +248,7 @@ path.format({
 path.format({
   root: '/',
   base: 'file.txt',
-  ext: 'ignored'
+  ext: 'ignored',
 });
 // Returns: '/file.txt'
 
@@ -256,7 +256,7 @@ path.format({
 path.format({
   root: '/',
   name: 'file',
-  ext: '.txt'
+  ext: '.txt',
 });
 // Returns: '/file.txt'
 
@@ -264,7 +264,7 @@ path.format({
 path.format({
   root: '/',
   name: 'file',
-  ext: 'txt'
+  ext: 'txt',
 });
 // Returns: '/file.txt'
 ```
@@ -274,7 +274,7 @@ On Windows:
 ```js
 path.format({
   dir: 'C:\\path\\dir',
-  base: 'file.txt'
+  base: 'file.txt',
 });
 // Returns: 'C:\\path\\dir\\file.txt'
 ```

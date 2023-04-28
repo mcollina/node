@@ -5,6 +5,7 @@
 #include "src/objects/simd.h"
 
 #include "src/base/cpu.h"
+#include "src/codegen/cpu-features.h"
 #include "src/objects/compressed-slots.h"
 #include "src/objects/fixed-array-inl.h"
 #include "src/objects/heap-number-inl.h"
@@ -39,8 +40,12 @@ enum class SimdKinds { kSSE, kNeon, kAVX2, kNone };
 
 inline SimdKinds get_vectorization_kind() {
 #ifdef __SSE3__
-  static base::CPU cpu;
-  if (cpu.has_avx2()) {
+#if defined(V8_TARGET_ARCH_IA32) || defined(V8_TARGET_ARCH_X64)
+  bool has_avx2 = CpuFeatures::IsSupported(AVX2);
+#else
+  bool has_avx2 = false;
+#endif
+  if (has_avx2) {
     return SimdKinds::kAVX2;
   } else {
     // No need for a runtime check since we do not support x86/x64 CPUs without
@@ -94,7 +99,7 @@ inline uintptr_t slow_search(T* array, uintptr_t array_len, uintptr_t index,
 // is uint64_t[2], and not uint32_t[4].
 // C++ standard dictates that a union can only be initialized through its first
 // member, which forces us to have uint64_t[2] for definition.
-#if defined(_MSC_VER)
+#if defined(_MSC_VER) && !defined(__clang__)
 #define PACK32x4(w, x, y, z) \
   { ((w) + (uint64_t(x) << 32)), ((y) + (uint64_t(z) << 32)) }
 #else

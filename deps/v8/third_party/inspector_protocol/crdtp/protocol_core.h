@@ -1,4 +1,4 @@
-// Copyright 2020 The Chromium Authors. All rights reserved.
+// Copyright 2020 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "cbor.h"
@@ -306,8 +307,6 @@ class ProtocolObject : public Serializable,
     AppendSerialized(&serialized);
     return T::ReadFrom(std::move(serialized)).value();
   }
-  // TODO(caseq): compatibility only, remove.
-  std::unique_ptr<T> clone() const { return Clone(); }
 
  protected:
   using ProtocolType = T;

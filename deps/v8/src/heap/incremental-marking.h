@@ -86,14 +86,6 @@ class V8_EXPORT_PRIVATE IncrementalMarking final {
 
   IncrementalMarking(Heap* heap, WeakObjects* weak_objects);
 
-  MarkingState* marking_state() { return &marking_state_; }
-  AtomicMarkingState* atomic_marking_state() { return &atomic_marking_state_; }
-  NonAtomicMarkingState* non_atomic_marking_state() {
-    return &non_atomic_marking_state_;
-  }
-
-  void NotifyLeftTrimming(HeapObject from, HeapObject to);
-
   bool IsStopped() const { return !IsMarking(); }
   bool IsMarking() const { return is_marking_; }
   bool IsMajorMarkingComplete() const {
@@ -128,16 +120,12 @@ class V8_EXPORT_PRIVATE IncrementalMarking final {
   // marking completes.
   void AdvanceOnAllocation();
 
-  // This function is used to color the object black before it undergoes an
-  // unsafe layout change. This is a part of synchronization protocol with
-  // the concurrent marker.
-  void MarkBlackAndVisitObjectDueToLayoutChange(HeapObject obj);
-
   void MarkBlackBackground(HeapObject obj, int object_size);
 
   bool IsCompacting() { return IsMarking() && is_compacting_; }
 
   Heap* heap() const { return heap_; }
+  Isolate* isolate() const;
 
   IncrementalMarkingJob* incremental_marking_job() {
     return &incremental_marking_job_;
@@ -169,6 +157,9 @@ class V8_EXPORT_PRIVATE IncrementalMarking final {
   }
 
  private:
+  MarkingState* marking_state() { return marking_state_; }
+  AtomicMarkingState* atomic_marking_state() { return atomic_marking_state_; }
+
   class IncrementalMarkingRootMarkingVisitor;
 
   class Observer : public AllocationObserver {
@@ -270,9 +261,8 @@ class V8_EXPORT_PRIVATE IncrementalMarking final {
   Observer new_generation_observer_;
   Observer old_generation_observer_;
 
-  MarkingState marking_state_;
-  AtomicMarkingState atomic_marking_state_;
-  NonAtomicMarkingState non_atomic_marking_state_;
+  MarkingState* const marking_state_;
+  AtomicMarkingState* const atomic_marking_state_;
 
   base::Mutex background_live_bytes_mutex_;
   std::unordered_map<MemoryChunk*, intptr_t> background_live_bytes_;

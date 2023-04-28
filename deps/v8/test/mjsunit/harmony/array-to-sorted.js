@@ -7,32 +7,39 @@
 assertEquals(1, Array.prototype.toSorted.length);
 assertEquals("toSorted", Array.prototype.toSorted.name);
 
-function TerribleCopy(input) {
+function TerribleCopy(input, fillHoles) {
   let copy;
   if (Array.isArray(input)) {
-    copy = [...input];
+    copy = new Array(input.length);
   } else {
     copy = { length: input.length };
-    for (let i = 0; i < input.length; i++) {
+  }
+  for (let i = 0; i < input.length; ++i) {
+    if (i in input) {
       copy[i] = input[i];
+    } else if (fillHoles) {
+      copy[i] = undefined;
     }
   }
   return copy;
 }
 
 function AssertToSortedAndSortSameResult(input, ...args) {
-  const orig = TerribleCopy(input);
+  const orig = TerribleCopy(input, false);
   const s = Array.prototype.toSorted.apply(input, args);
-  const copy = TerribleCopy(input);
+  const copy = TerribleCopy(input, true);
   Array.prototype.sort.apply(copy, args);
 
   // The in-place sorted version should be pairwise equal to the toSorted,
-  // modulo being an actual Array if the input is generic.
+  // modulo being an actual Array if the input is generic, and holes should
+  // be filled with undefined.
   if (Array.isArray(input)) {
     assertEquals(copy, s);
   } else {
     assertEquals(copy.length, s.length);
     for (let i = 0; i < copy.length; i++) {
+      assertTrue(i in copy);
+      assertTrue(i in s);
       assertEquals(copy[i], s[i]);
     }
   }
@@ -56,25 +63,25 @@ function TestToSortedBasicBehaviorHelper(input) {
 }
 
 // Smi packed
-AssertToSortedAndSortSameResult([1,3,2,4]);
+TestToSortedBasicBehaviorHelper([1,3,2,4]);
 
 // Double packed
-AssertToSortedAndSortSameResult([1.1,3.3,2.2,4.4]);
+TestToSortedBasicBehaviorHelper([1.1,3.3,2.2,4.4]);
 
 // Packed
-AssertToSortedAndSortSameResult([true,false,1,42.42,null,"foo"]);
+TestToSortedBasicBehaviorHelper([true,false,1,42.42,null,"foo"]);
 
 // Smi holey
-AssertToSortedAndSortSameResult([1,,3,,2,,4,,]);
+TestToSortedBasicBehaviorHelper([1,,3,,2,,4,,]);
 
 // Double holey
-AssertToSortedAndSortSameResult([1.1,,3.3,,2.2,,4.4,,]);
+TestToSortedBasicBehaviorHelper([1.1,,3.3,,2.2,,4.4,,]);
 
 // Holey
-AssertToSortedAndSortSameResult([true,,false,,1,,42.42,,null,,"foo",,]);
+TestToSortedBasicBehaviorHelper([true,,false,,1,,42.42,,null,,"foo",,]);
 
 // Generic
-AssertToSortedAndSortSameResult({ length: 4,
+TestToSortedBasicBehaviorHelper({ length: 4,
                                   get "0"() { return "hello"; },
                                   get "1"() { return "cursed"; },
                                   get "2"() { return "java"; },
@@ -92,6 +99,12 @@ AssertToSortedAndSortSameResult({ length: 4,
   });
   assertEquals([1,2,3,4], s);
   assertEquals(0, a.length);
+})();
+
+(function TestBig() {
+  const a = [];
+  a[50001] = 42.42;
+  a.toSorted();
 })();
 
 (function TestTooBig() {

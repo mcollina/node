@@ -458,7 +458,8 @@ const icu::UnicodeString CurrencyFromSkeleton(
   return skeleton.tempSubString(index, 3);
 }
 
-const icu::UnicodeString NumberingSystemFromSkeleton(
+}  // namespace
+const icu::UnicodeString JSNumberFormat::NumberingSystemFromSkeleton(
     const icu::UnicodeString& skeleton) {
   const char numbering_system[] = "numbering-system/";
   int32_t index = skeleton.indexOf(numbering_system);
@@ -469,6 +470,8 @@ const icu::UnicodeString NumberingSystemFromSkeleton(
   if (index < 0) return res;
   return res.tempSubString(0, index);
 }
+
+namespace {
 
 // Return CurrencySign as string based on skeleton.
 Handle<String> CurrencySignString(Isolate* isolate,
@@ -949,7 +952,7 @@ Handle<JSObject> JSNumberFormat::ResolvedOptions(
 
   Handle<String> locale = Handle<String>(number_format->locale(), isolate);
   const icu::UnicodeString numberingSystem_ustr =
-      NumberingSystemFromSkeleton(skeleton);
+      JSNumberFormat::NumberingSystemFromSkeleton(skeleton);
   // 5. For each row of Table 4, except the header row, in table order, do
   // Table 4: Resolved Options of NumberFormat Instances
   //  Internal Slot                    Property
@@ -1439,8 +1442,32 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
     }
   }
 
+  int rounding_increment = 1;
+  if (v8_flags.harmony_intl_number_format_v3) {
+    // 18. Let roundingIncrement be ? GetNumberOption(options,
+    // "roundingIncrement,", 1, 5000, 1).
+    Maybe<int> maybe_rounding_increment = GetNumberOption(
+        isolate, options, factory->roundingIncrement_string(), 1, 5000, 1);
+    if (!maybe_rounding_increment.To(&rounding_increment)) {
+      return MaybeHandle<JSNumberFormat>();
+    }
+
+    // 19. If roundingIncrement is not in « 1, 2, 5, 10, 20, 25, 50, 100, 200,
+    // 250, 500, 1000, 2000, 2500, 5000 », throw a RangeError exception.
+    if (!IsValidRoundingIncrement(rounding_increment)) {
+      THROW_NEW_ERROR(isolate,
+                      NewRangeError(MessageTemplate::kPropertyValueOutOfRange,
+                                    factory->roundingIncrement_string()),
+                      JSNumberFormat);
+    }
+    // 20. If roundingIncrement is not 1, set mxfdDefault to mnfdDefault.
+    if (rounding_increment != 1) {
+      mxfd_default = mnfd_default;
+    }
+  }
+
   Notation notation = Notation::STANDARD;
-  // 18. Let notation be ? GetOption(options, "notation", "string", «
+  // 21. Let notation be ? GetOption(options, "notation", "string", «
   // "standard", "scientific",  "engineering", "compact" », "standard").
   MAYBE_ASSIGN_RETURN_ON_EXCEPTION_VALUE(
       isolate, notation,
@@ -1451,9 +1478,9 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
            Notation::COMPACT},
           Notation::STANDARD),
       Handle<JSNumberFormat>());
-  // 19. Set numberFormat.[[Notation]] to notation.
+  // 22. Set numberFormat.[[Notation]] to notation.
 
-  // 20. Perform ? SetNumberFormatDigitOptions(numberFormat, options,
+  // 23. Perform ? SetNumberFormatDigitOptions(numberFormat, options,
   // mnfdDefault, mxfdDefault).
   Maybe<Intl::NumberFormatDigitOptions> maybe_digit_options =
       Intl::SetNumberFormatDigitOptions(isolate, options, mnfd_default,
@@ -1463,32 +1490,16 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
   Intl::NumberFormatDigitOptions digit_options = maybe_digit_options.FromJust();
 
   if (v8_flags.harmony_intl_number_format_v3) {
-    // 21. Let roundingIncrement be ? GetNumberOption(options,
-    // "roundingIncrement,", 1, 5000, 1).
-    int rounding_increment = 1;
-    Maybe<int> maybe_rounding_increment = GetNumberOption(
-        isolate, options, factory->roundingIncrement_string(), 1, 5000, 1);
-    MAYBE_RETURN(maybe_rounding_increment, MaybeHandle<JSNumberFormat>());
-    CHECK(maybe_rounding_increment.To(&rounding_increment));
-
-    // 22. If roundingIncrement is not in « 1, 2, 5, 10, 20, 25, 50, 100, 200,
-    // 250, 500, 1000, 2000, 2500, 5000 », throw a RangeError exception.
-    if (!IsValidRoundingIncrement(rounding_increment)) {
-      THROW_NEW_ERROR(isolate,
-                      NewRangeError(MessageTemplate::kPropertyValueOutOfRange,
-                                    factory->roundingIncrement_string()),
-                      JSNumberFormat);
-    }
+    // 24. If roundingIncrement is not 1, then
     if (rounding_increment != 1) {
-      // 23. If roundingIncrement is not 1 and numberFormat.[[RoundingType]] is
-      // not fractionDigits, throw a TypeError exception.
+      // a. If numberFormat.[[RoundingType]] is not fractionDigits, throw a
+      // TypeError exception.
       if (digit_options.rounding_type != Intl::RoundingType::kFractionDigits) {
         THROW_NEW_ERROR(isolate,
                         NewTypeError(MessageTemplate::kBadRoundingType),
                         JSNumberFormat);
       }
-      // 24. If roundingIncrement is not 1 and
-      // numberFormat.[[MaximumFractionDigits]] is not equal to
+      // b. If numberFormat.[[MaximumFractionDigits]] is not equal to
       // numberFormat.[[MinimumFractionDigits]], throw a RangeError exception.
       if (digit_options.maximum_fraction_digits !=
           digit_options.minimum_fraction_digits) {
@@ -1501,7 +1512,7 @@ MaybeHandle<JSNumberFormat> JSNumberFormat::New(Isolate* isolate,
       }
     }
 
-    // 25. Set _numberFormat.[[RoundingIncrement]] to roundingIncrement.
+    // 25. Set numberFormat.[[RoundingIncrement]] to roundingIncrement.
 
     // 26. Let trailingZeroDisplay be ? GetOption(options,
     // "trailingZeroDisplay", "string", « "auto", "stripIfInteger" », "auto").

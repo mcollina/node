@@ -649,7 +649,7 @@ static inline void PrintStats(const ConsStringGenerationData& data) {
 
 template <typename BuildString>
 void TestStringCharacterStream(BuildString build, int test_cases) {
-  FLAG_gc_global = true;
+  v8_flags.gc_global = true;
   CcTest::InitializeVM();
   Isolate* isolate = CcTest::i_isolate();
   HandleScope outer_scope(isolate);
@@ -1154,7 +1154,7 @@ TEST(ReplaceInvalidUtf8) {
 }
 
 TEST(JSONStringifySliceMadeExternal) {
-  if (!FLAG_string_slices) return;
+  if (!v8_flags.string_slices) return;
   CcTest::InitializeVM();
   // Create a sliced string from a one-byte string.  The latter is turned
   // into a two-byte external string.  Check that JSON.stringify works.
@@ -1330,7 +1330,7 @@ TEST(CachedHashOverflow) {
 }
 
 TEST(SliceFromCons) {
-  if (!FLAG_string_slices) return;
+  if (!v8_flags.string_slices) return;
   CcTest::InitializeVM();
   Factory* factory = CcTest::i_isolate()->factory();
   v8::HandleScope scope(CcTest::isolate());
@@ -1365,7 +1365,7 @@ class OneByteVectorResource : public v8::String::ExternalOneByteStringResource {
 };
 
 TEST(InternalizeExternal) {
-  FLAG_stress_incremental_marking = false;
+  v8_flags.stress_incremental_marking = false;
   CcTest::InitializeVM();
   i::Isolate* isolate = CcTest::i_isolate();
   Factory* factory = isolate->factory();
@@ -1393,8 +1393,51 @@ TEST(InternalizeExternal) {
   CcTest::CollectGarbage(i::OLD_SPACE);
 }
 
+TEST(Regress1402187) {
+  CcTest::InitializeVM();
+  i::Isolate* isolate = CcTest::i_isolate();
+  Factory* factory = isolate->factory();
+  // This won't leak; the external string mechanism will call Dispose() on it.
+  const char ext_string_content[] = "prop-1234567890asdf";
+  OneByteVectorResource* resource =
+      new OneByteVectorResource(v8::base::Vector<const char>(
+          ext_string_content, strlen(ext_string_content)));
+  const uint32_t fake_hash =
+      String::CreateHashFieldValue(4711, String::HashFieldType::kHash);
+  {
+    v8::HandleScope scope(CcTest::isolate());
+    // Internalize a string with the same hash to ensure collision.
+    Handle<String> intern = isolate->factory()->NewStringFromAsciiChecked(
+        "internalized1234567", AllocationType::kOld);
+    intern->set_raw_hash_field(fake_hash);
+    factory->InternalizeName(intern);
+    CHECK(intern->IsInternalizedString());
+
+    v8::Local<v8::String> ext_string =
+        v8::String::NewFromUtf8Literal(CcTest::isolate(), ext_string_content);
+    ext_string->MakeExternal(resource);
+    Handle<String> string = v8::Utils::OpenHandle(*ext_string);
+    string->set_raw_hash_field(fake_hash);
+    CHECK(string->IsExternalString());
+    CHECK(!StringShape(*string).IsUncachedExternal());
+    CHECK(!string->IsInternalizedString());
+    CHECK(!String::Equals(isolate, string, intern));
+    CHECK_EQ(string->hash(), intern->hash());
+    CHECK_EQ(string->length(), intern->length());
+
+    CHECK_EQ(isolate->string_table()->TryStringToIndexOrLookupExisting(
+                 isolate, string->ptr()),
+             Smi::FromInt(ResultSentinel::kNotFound).ptr());
+    string = factory->InternalizeString(string);
+    CHECK(string->IsExternalString());
+    CHECK(string->IsInternalizedString());
+  }
+  CcTest::CollectGarbage(i::OLD_SPACE);
+  CcTest::CollectGarbage(i::OLD_SPACE);
+}
+
 TEST(SliceFromExternal) {
-  if (!FLAG_string_slices) return;
+  if (!v8_flags.string_slices) return;
   CcTest::InitializeVM();
   Factory* factory = CcTest::i_isolate()->factory();
   v8::HandleScope scope(CcTest::isolate());
@@ -1417,7 +1460,7 @@ TEST(SliceFromExternal) {
 TEST(TrivialSlice) {
   // This tests whether a slice that contains the entire parent string
   // actually creates a new string (it should not).
-  if (!FLAG_string_slices) return;
+  if (!v8_flags.string_slices) return;
   CcTest::InitializeVM();
   Factory* factory = CcTest::i_isolate()->factory();
   v8::HandleScope scope(CcTest::isolate());
@@ -1446,7 +1489,7 @@ TEST(TrivialSlice) {
 TEST(SliceFromSlice) {
   // This tests whether a slice that contains the entire parent string
   // actually creates a new string (it should not).
-  if (!FLAG_string_slices) return;
+  if (!v8_flags.string_slices) return;
   CcTest::InitializeVM();
   v8::HandleScope scope(CcTest::isolate());
   v8::Local<v8::Value> result;
@@ -1682,8 +1725,8 @@ TEST(FormatMessage) {
   Handle<String> arg1 = isolate->factory()->NewStringFromAsciiChecked("arg1");
   Handle<String> arg2 = isolate->factory()->NewStringFromAsciiChecked("arg2");
   Handle<String> result =
-      MessageFormatter::Format(isolate, MessageTemplate::kPropertyNotFunction,
-                               arg0, arg1, arg2)
+      MessageFormatter::TryFormat(
+          isolate, MessageTemplate::kPropertyNotFunction, arg0, arg1, arg2)
           .ToHandleChecked();
   Handle<String> expected = isolate->factory()->NewStringFromAsciiChecked(
       "'arg0' returned for property 'arg1' of object 'arg2' is not a function");
@@ -1854,9 +1897,9 @@ class OneByteStringResource : public v8::String::ExternalOneByteStringResource {
 
 TEST(Regress876759) {
   // Thin strings are used in conjunction with young gen
-  if (FLAG_single_generation) return;
+  if (v8_flags.single_generation) return;
   // We don't create ThinStrings immediately when using the forwarding table.
-  if (FLAG_always_use_string_forwarding_table) return;
+  if (v8_flags.always_use_string_forwarding_table) return;
   Isolate* isolate = CcTest::i_isolate();
   Factory* factory = isolate->factory();
 
@@ -1893,7 +1936,6 @@ TEST(Regress876759) {
   // The grandparent string becomes one-byte, but the child strings are still
   // two-byte.
   CHECK(grandparent->IsOneByteRepresentation());
-  CHECK(parent->IsTwoByteRepresentation());
   CHECK(sliced->IsTwoByteRepresentation());
   // The *Underneath version returns the correct representation.
   CHECK(String::IsOneByteRepresentationUnderneath(*sliced));

@@ -44,16 +44,18 @@ class APIExceptionTest : public TestWithIsolate {
 
 class V8_NODISCARD ScopedExposeGc {
  public:
-  ScopedExposeGc() : was_exposed_(i::FLAG_expose_gc) {
-    i::FLAG_expose_gc = true;
+  ScopedExposeGc() : was_exposed_(i::v8_flags.expose_gc) {
+    i::v8_flags.expose_gc = true;
   }
-  ~ScopedExposeGc() { i::FLAG_expose_gc = was_exposed_; }
+  ~ScopedExposeGc() { i::v8_flags.expose_gc = was_exposed_; }
 
  private:
   const bool was_exposed_;
 };
 
 TEST_F(APIExceptionTest, ExceptionMessageDoesNotKeepContextAlive) {
+  i::DisableConservativeStackScanningScopeForTesting no_stack_scanning(
+      i_isolate()->heap());
   ScopedExposeGc expose_gc;
   Persistent<Context> weak_context;
   {

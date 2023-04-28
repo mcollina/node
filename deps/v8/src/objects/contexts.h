@@ -157,6 +157,8 @@ enum ContextLookupFlags {
     intl_date_time_format_function)                                            \
   V(INTL_DISPLAY_NAMES_FUNCTION_INDEX, JSFunction,                             \
     intl_display_names_function)                                               \
+  V(INTL_DURATION_FORMAT_FUNCTION_INDEX, JSFunction,                           \
+    intl_duration_format_function)                                             \
   V(INTL_NUMBER_FORMAT_FUNCTION_INDEX, JSFunction,                             \
     intl_number_format_function)                                               \
   V(INTL_LOCALE_FUNCTION_INDEX, JSFunction, intl_locale_function)              \
@@ -167,6 +169,12 @@ enum ContextLookupFlags {
   V(INTL_SEGMENTER_FUNCTION_INDEX, JSFunction, intl_segmenter_function)        \
   V(INTL_SEGMENTS_MAP_INDEX, Map, intl_segments_map)                           \
   V(INTL_SEGMENT_ITERATOR_MAP_INDEX, Map, intl_segment_iterator_map)           \
+  V(ITERATOR_FILTER_HELPER_MAP_INDEX, Map, iterator_filter_helper_map)         \
+  V(ITERATOR_MAP_HELPER_MAP_INDEX, Map, iterator_map_helper_map)               \
+  V(ITERATOR_TAKE_HELPER_MAP_INDEX, Map, iterator_take_helper_map)             \
+  V(ITERATOR_DROP_HELPER_MAP_INDEX, Map, iterator_drop_helper_map)             \
+  V(ITERATOR_FUNCTION_INDEX, JSFunction, iterator_function)                    \
+  V(VALID_ITERATOR_WRAPPER_MAP_INDEX, Map, valid_iterator_wrapper_map)         \
   V(ITERATOR_RESULT_MAP_INDEX, Map, iterator_result_map)                       \
   V(JS_ARRAY_PACKED_SMI_ELEMENTS_MAP_INDEX, Map,                               \
     js_array_packed_smi_elements_map)                                          \
@@ -178,11 +186,14 @@ enum ContextLookupFlags {
     js_array_packed_double_elements_map)                                       \
   V(JS_ARRAY_HOLEY_DOUBLE_ELEMENTS_MAP_INDEX, Map,                             \
     js_array_holey_double_elements_map)                                        \
+  V(JS_ARRAY_TEMPLATE_LITERAL_OBJECT_MAP, Map,                                 \
+    js_array_template_literal_object_map)                                      \
   V(JS_ATOMICS_CONDITION_MAP, Map, js_atomics_condition_map)                   \
   V(JS_ATOMICS_MUTEX_MAP, Map, js_atomics_mutex_map)                           \
   V(JS_MAP_FUN_INDEX, JSFunction, js_map_fun)                                  \
   V(JS_MAP_MAP_INDEX, Map, js_map_map)                                         \
   V(JS_MODULE_NAMESPACE_MAP, Map, js_module_namespace_map)                     \
+  V(JS_RAW_JSON_MAP, Map, js_raw_json_map)                                     \
   V(JS_SET_FUN_INDEX, JSFunction, js_set_fun)                                  \
   V(JS_SET_MAP_INDEX, Map, js_set_map)                                         \
   V(JS_WEAK_MAP_FUN_INDEX, JSFunction, js_weak_map_fun)                        \
@@ -209,6 +220,7 @@ enum ContextLookupFlags {
     temporal_time_zone_function)                                               \
   V(JS_TEMPORAL_ZONED_DATE_TIME_FUNCTION_INDEX, JSFunction,                    \
     temporal_zoned_date_time_function)                                         \
+  V(JSON_OBJECT, JSObject, json_object)                                        \
   V(TEMPORAL_INSTANT_FIXED_ARRAY_FROM_ITERABLE_FUNCTION_INDEX, JSFunction,     \
     temporal_instant_fixed_array_from_iterable)                                \
   V(STRING_FIXED_ARRAY_FROM_ITERABLE_FUNCTION_INDEX, JSFunction,               \
@@ -224,6 +236,7 @@ enum ContextLookupFlags {
   V(CATCH_CONTEXT_MAP_INDEX, Map, catch_context_map)                           \
   V(WITH_CONTEXT_MAP_INDEX, Map, with_context_map)                             \
   V(DEBUG_EVALUATE_CONTEXT_MAP_INDEX, Map, debug_evaluate_context_map)         \
+  V(JS_RAB_GSAB_DATA_VIEW_MAP_INDEX, Map, js_rab_gsab_data_view_map)           \
   V(MAP_CACHE_INDEX, Object, map_cache)                                        \
   V(MAP_KEY_ITERATOR_MAP_INDEX, Map, map_key_iterator_map)                     \
   V(MAP_KEY_VALUE_ITERATOR_MAP_INDEX, Map, map_key_value_iterator_map)         \
@@ -543,13 +556,11 @@ class Context : public TorqueGeneratedContext<Context, HeapObject> {
 
     // Properties from here are treated as weak references by the full GC.
     // Scavenge treats them as strong references.
-    OPTIMIZED_CODE_LIST,    // Weak.
-    DEOPTIMIZED_CODE_LIST,  // Weak.
-    NEXT_CONTEXT_LINK,      // Weak.
+    NEXT_CONTEXT_LINK,  // Weak.
 
     // Total number of slots.
     NATIVE_CONTEXT_SLOTS,
-    FIRST_WEAK_SLOT = OPTIMIZED_CODE_LIST,
+    FIRST_WEAK_SLOT = NEXT_CONTEXT_LINK,
     FIRST_JS_ARRAY_MAP_SLOT = JS_ARRAY_PACKED_SMI_ELEMENTS_MAP_INDEX,
 
     // TODO(shell): Remove, once it becomes zero
@@ -746,6 +757,8 @@ class NativeContext : public Context {
   inline Map TypedArrayElementsKindToRabGsabCtorMap(
       ElementsKind element_kind) const;
 
+  bool HasTemplateLiteralObject(JSArray array);
+
   // Dispatched behavior.
   DECL_PRINTER(NativeContext)
   DECL_VERIFIER(NativeContext)
@@ -771,14 +784,6 @@ class NativeContext : public Context {
 #undef NATIVE_CONTEXT_FIELDS_DEF
 
   class BodyDescriptor;
-
-  // The native context stores a list of all optimized code and a list of all
-  // deoptimized code, which are needed by the deoptimizer.
-  V8_EXPORT_PRIVATE void AddOptimizedCode(CodeT code);
-  inline void SetOptimizedCodeListHead(Object head);
-  inline Object OptimizedCodeListHead();
-  inline void SetDeoptimizedCodeListHead(Object head);
-  inline Object DeoptimizedCodeListHead();
 
   void ResetErrorsThrown();
   void IncrementErrorsThrown();

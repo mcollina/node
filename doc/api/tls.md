@@ -29,7 +29,7 @@ let tls;
 try {
   tls = require('node:tls');
 } catch (err) {
-  console.log('tls support is disabled!');
+  console.error('tls support is disabled!');
 }
 ```
 
@@ -47,7 +47,7 @@ let tls;
 try {
   tls = await import('node:tls');
 } catch (err) {
-  console.log('tls support is disabled!');
+  console.error('tls support is disabled!');
 }
 ```
 
@@ -123,26 +123,20 @@ all sessions). Methods implementing this technique are called "ephemeral".
 Currently two methods are commonly used to achieve perfect forward secrecy (note
 the character "E" appended to the traditional abbreviations):
 
-* [DHE][]: An ephemeral version of the Diffie-Hellman key-agreement protocol.
 * [ECDHE][]: An ephemeral version of the Elliptic Curve Diffie-Hellman
   key-agreement protocol.
+* [DHE][]: An ephemeral version of the Diffie-Hellman key-agreement protocol.
 
-To use perfect forward secrecy using `DHE` with the `node:tls` module, it is
-required to generate Diffie-Hellman parameters and specify them with the
-`dhparam` option to [`tls.createSecureContext()`][]. The following illustrates
-the use of the OpenSSL command-line interface to generate such parameters:
+Perfect forward secrecy using ECDHE is enabled by default. The `ecdhCurve`
+option can be used when creating a TLS server to customize the list of supported
+ECDH curves to use. See [`tls.createServer()`][] for more info.
 
-```bash
-openssl dhparam -outform PEM -out dhparam.pem 2048
-```
+DHE is disabled by default but can be enabled alongside ECDHE by setting the
+`dhparam` option to `'auto'`. Custom DHE parameters are also supported but
+discouraged in favor of automatically selected, well-known parameters.
 
-If using perfect forward secrecy using `ECDHE`, Diffie-Hellman parameters are
-not required and a default ECDHE curve will be used. The `ecdhCurve` property
-can be used when creating a TLS Server to specify the list of names of supported
-curves to use, see [`tls.createServer()`][] for more info.
-
-Perfect forward secrecy was optional up to TLSv1.2, but it is not optional for
-TLSv1.3, because all TLSv1.3 cipher suites use ECDHE.
+Perfect forward secrecy was optional up to TLSv1.2. As of TLSv1.3, (EC)DHE is
+always used (with the exception of PSK-only connections).
 
 ### ALPN and SNI
 
@@ -354,6 +348,30 @@ node --tls-cipher-list='ECDHE-RSA-AES128-GCM-SHA256:!RC4' server.js
 
 export NODE_OPTIONS=--tls-cipher-list='ECDHE-RSA-AES128-GCM-SHA256:!RC4'
 node server.js
+```
+
+To verify, use the following command to show the set cipher list, note the
+difference between `defaultCoreCipherList` and `defaultCipherList`:
+
+```bash
+node --tls-cipher-list='ECDHE-RSA-AES128-GCM-SHA256:!RC4' -p crypto.constants.defaultCipherList | tr ':' '\n'
+ECDHE-RSA-AES128-GCM-SHA256
+!RC4
+```
+
+i.e. the `defaultCoreCipherList` list is set at compilation time and the
+`defaultCipherList` is set at runtime.
+
+To modify the default cipher suites from within the runtime, modify the
+`tls.DEFAULT_CIPHERS` variable, this must be performed before listening on any
+sockets, it will not affect sockets already opened. For example:
+
+```js
+// Remove Obsolete CBC Ciphers and RSA Key Exchange based Ciphers as they don't provide Forward Secrecy
+tls.DEFAULT_CIPHERS +=
+  ':!ECDHE-RSA-AES128-SHA:!ECDHE-RSA-AES128-SHA256:!ECDHE-RSA-AES256-SHA:!ECDHE-RSA-AES256-SHA384' +
+  ':!ECDHE-ECDSA-AES128-SHA:!ECDHE-ECDSA-AES128-SHA256:!ECDHE-ECDSA-AES256-SHA:!ECDHE-ECDSA-AES256-SHA384' +
+  ':!kRSA';
 ```
 
 The default can also be replaced on a per client or server basis using the
@@ -710,9 +728,10 @@ added: v0.5.3
 -->
 
 * `hostname` {string} A SNI host name or wildcard (e.g. `'*'`)
-* `context` {Object} An object containing any of the possible properties
-  from the [`tls.createSecureContext()`][] `options` arguments (e.g. `key`,
-  `cert`, `ca`, etc).
+* `context` {Object|tls.SecureContext} An object containing any of the possible
+  properties from the [`tls.createSecureContext()`][] `options` arguments
+  (e.g. `key`, `cert`, `ca`, etc), or a TLS context object created with
+  [`tls.createSecureContext()`][] itself.
 
 The `server.addContext()` method adds a secure context that will be used if
 the client request's SNI name matches the supplied `hostname` (or wildcard).
@@ -1174,6 +1193,11 @@ certificate.
 <!-- YAML
 changes:
   - version:
+      - v19.1.0
+      - v18.13.0
+    pr-url: https://github.com/nodejs/node/pull/44935
+    description: Add "ca" property.
+  - version:
       - v17.2.0
       - v16.14.0
     pr-url: https://github.com/nodejs/node/pull/39809
@@ -1186,6 +1210,7 @@ changes:
 A certificate object has properties corresponding to the fields of the
 certificate.
 
+* `ca` {boolean} `true` if a Certificate Authority (CA), `false` otherwise.
 * `raw` {Buffer} The DER encoded X.509 certificate data.
 * `subject` {Object} The certificate subject, described in terms of
   Country (`C`), StateOrProvince (`ST`), Locality (`L`), Organization (`O`),
@@ -1768,6 +1793,12 @@ argument.
 <!-- YAML
 added: v0.11.13
 changes:
+  - version:
+    - v19.8.0
+    - v18.16.0
+    pr-url: https://github.com/nodejs/node/pull/46978
+    description: The `dhparam` option can now be set to `'auto'` to
+                 enable DHE with appropriate well-known parameters.
   - version: v12.12.0
     pr-url: https://github.com/nodejs/node/pull/28973
     description: Added `privateKeyIdentifier` and `privateKeyEngine` options
@@ -1852,12 +1883,10 @@ changes:
     client certificate.
   * `crl` {string|string\[]|Buffer|Buffer\[]} PEM formatted CRLs (Certificate
     Revocation Lists).
-  * `dhparam` {string|Buffer} Diffie-Hellman parameters, required for
-    [perfect forward secrecy][]. Use `openssl dhparam` to create the parameters.
-    The key length must be greater than or equal to 1024 bits or else an error
-    will be thrown. Although 1024 bits is permissible, use 2048 bits or larger
-    for stronger security. If omitted or invalid, the parameters are silently
-    discarded and DHE ciphers will not be available.
+  * `dhparam` {string|Buffer} `'auto'` or custom Diffie-Hellman parameters,
+    required for non-ECDHE [perfect forward secrecy][]. If omitted or invalid,
+    the parameters are silently discarded and DHE ciphers will not be available.
+    [ECDHE][]-based [perfect forward secrecy][] will still be available.
   * `ecdhCurve` {string} A string describing a named curve or a colon separated
     list of curve NIDs or names, for example `P-521:P-384:P-256`, to use for
     ECDH key agreement. Set to `auto` to select the
@@ -1934,14 +1963,22 @@ from `process.argv` as the default value of the `sessionIdContext` option, other
 APIs that create secure contexts have no default value.
 
 The `tls.createSecureContext()` method creates a `SecureContext` object. It is
-usable as an argument to several `tls` APIs, such as [`tls.createServer()`][]
-and [`server.addContext()`][], but has no public methods.
+usable as an argument to several `tls` APIs, such as [`server.addContext()`][],
+but has no public methods. The [`tls.Server`][] constructor and the
+[`tls.createServer()`][] method do not support the `secureContext` option.
 
 A key is _required_ for ciphers that use certificates. Either `key` or
 `pfx` can be used to provide it.
 
 If the `ca` option is not given, then Node.js will default to using
 [Mozilla's publicly trusted list of CAs][].
+
+Custom DHE parameters are discouraged in favor of the new `dhparam: 'auto'`
+option. When set to `'auto'`, well-known DHE parameters of sufficient strength
+will be selected automatically. Otherwise, if necessary, `openssl dhparam` can
+be used to create custom parameters. The key length must be greater than or
+equal to 1024 bits or else an error will be thrown. Although 1024 bits is
+permissible, use 2048 bits or larger for stronger security.
 
 ## `tls.createSecurePair([context][, isServer][, requestCert][, rejectUnauthorized][, options])`
 
@@ -2012,7 +2049,7 @@ where `secureSocket` has the same API as `pair.cleartext`.
 <!-- YAML
 added: v0.3.2
 changes:
-  - version: REPLACEME
+  - version: v19.0.0
     pr-url: https://github.com/nodejs/node/pull/44031
     description: If `ALPNProtocols` is set, incoming connections that send an
                  ALPN extension with no supported protocols are terminated with
@@ -2122,7 +2159,7 @@ const options = {
   requestCert: true,
 
   // This is necessary only if the client uses a self-signed certificate.
-  ca: [ fs.readFileSync('client-cert.pem') ]
+  ca: [ fs.readFileSync('client-cert.pem') ],
 };
 
 const server = tls.createServer(options, (socket) => {
@@ -2218,6 +2255,20 @@ added: v11.4.0
   the default to `'TLSv1.1'`. Using `--tls-min-v1.3` sets the default to
   `'TLSv1.3'`. If multiple of the options are provided, the lowest minimum is
   used.
+
+## `tls.DEFAULT_CIPHERS`
+
+<!-- YAML
+added:
+ - v19.8.0
+ - v18.16.0
+-->
+
+* {string} The default value of the `ciphers` option of
+  [`tls.createSecureContext()`][]. It can be assigned any of the supported
+  OpenSSL ciphers.  Defaults to the content of
+  `crypto.constants.defaultCoreCipherList`, unless changed using CLI options
+  using `--tls-default-ciphers`.
 
 [CVE-2021-44531]: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-44531
 [Chrome's 'modern cryptography' setting]: https://www.chromium.org/Home/chromium-security/education/tls#TOC-Cipher-Suites

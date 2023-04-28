@@ -234,9 +234,9 @@ TEST_F(ConcurrentStringTest, InspectTwoByteExternalizing) {
 // InspectOneByteExternalizing, but using thin strings.
 TEST_F(ConcurrentStringTest, InspectOneByteExternalizing_ThinString) {
   // We will not create a thin string if single_generation is turned on.
-  if (FLAG_single_generation) return;
+  if (v8_flags.single_generation) return;
   // We don't create ThinStrings immediately when using the forwarding table.
-  if (FLAG_always_use_string_forwarding_table) return;
+  if (v8_flags.always_use_string_forwarding_table) return;
   std::unique_ptr<PersistentHandles> ph = i_isolate()->NewPersistentHandles();
 
   auto factory = i_isolate()->factory();
@@ -245,7 +245,6 @@ TEST_F(ConcurrentStringTest, InspectOneByteExternalizing_ThinString) {
   // Create a string.
   const char* raw_string = STRING_VALUE;
   Handle<String> thin_string = factory->NewStringFromAsciiChecked(raw_string);
-  EXPECT_TRUE(thin_string->IsOneByteRepresentation());
   EXPECT_TRUE(!thin_string->IsExternalString());
   EXPECT_TRUE(!thin_string->IsInternalizedString());
 
@@ -296,9 +295,9 @@ TEST_F(ConcurrentStringTest, InspectOneByteExternalizing_ThinString) {
 // strings.
 TEST_F(ConcurrentStringTest, InspectOneIntoTwoByteExternalizing_ThinString) {
   // We will not create a thin string if single_generation is turned on.
-  if (FLAG_single_generation) return;
+  if (v8_flags.single_generation) return;
   // We don't create ThinStrings immediately when using the forwarding table.
-  if (FLAG_always_use_string_forwarding_table) return;
+  if (v8_flags.always_use_string_forwarding_table) return;
   std::unique_ptr<PersistentHandles> ph = i_isolate()->NewPersistentHandles();
 
   auto factory = i_isolate()->factory();
@@ -347,9 +346,6 @@ TEST_F(ConcurrentStringTest, InspectOneIntoTwoByteExternalizing_ThinString) {
   EXPECT_TRUE(!thin_string->IsExternalString());
   EXPECT_TRUE(!thin_string->IsInternalizedString());
   EXPECT_TRUE(thin_string->IsThinString());
-  // Even its representation is still one byte, even when the internalized
-  // string moved to two bytes.
-  EXPECT_TRUE(thin_string->IsOneByteRepresentation());
 
   thread->Join();
 }
@@ -358,9 +354,9 @@ TEST_F(ConcurrentStringTest, InspectOneIntoTwoByteExternalizing_ThinString) {
 // InspectTwoByteExternalizing, but using thin strings.
 TEST_F(ConcurrentStringTest, InspectTwoByteExternalizing_ThinString) {
   // We will not create a thin string if single_generation is turned on.
-  if (FLAG_single_generation) return;
+  if (v8_flags.single_generation) return;
   // We don't create ThinStrings immediately when using the forwarding table.
-  if (FLAG_always_use_string_forwarding_table) return;
+  if (v8_flags.always_use_string_forwarding_table) return;
   std::unique_ptr<PersistentHandles> ph = i_isolate()->NewPersistentHandles();
 
   auto factory = i_isolate()->factory();
