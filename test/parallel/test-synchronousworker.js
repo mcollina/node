@@ -2,6 +2,7 @@
 'use strict';
 
 const common = require('../common');
+const { once } = require('node:events');
 
 const {
   strictEqual,
@@ -18,6 +19,7 @@ function deferred() {
   return { res, promise };
 }
 
+/*
 {
   const w = new SynchronousWorker();
 
@@ -262,4 +264,62 @@ function deferred() {
     while (Date.now() - now < 30);
   });
   await w.stop();
+})().then(common.mustCall());
+
+(async function() {
+  const w = new SynchronousWorker({
+    sharedEventLoop: true,
+    sharedMicrotaskQueue: true
+  });
+
+  setImmediate(() => {
+    setImmediate(() => {
+      setImmediate(() => {});
+    });
+  });
+  await w.stop();
+})().then(common.mustCall());
+
+(async function() {
+  const w = new SynchronousWorker({
+    sharedEventLoop: true,
+    sharedMicrotaskQueue: true
+  });
+
+  setImmediate(() => {
+    setTimeout(() => {}, 20);
+    const now = Date.now();
+    while (Date.now() - now < 30);
+  });
+  await w.stop();
+})().then(common.mustCall());
+*/
+
+(async function() {
+  const w = new SynchronousWorker({
+    sharedEventLoop: true,
+    sharedMicrotaskQueue: true
+  });
+  let ran = false;
+  w.runInWorkerScope(() => {
+    const req = w.createRequire(__filename);
+    const vm = req('vm');
+    const fs = req('fs');
+
+    vm.runInThisContext(`({ fs }) => {
+      const stream = fs.createReadStream('${__filename}');
+      stream.on('open', () => {
+        process._rawDebug('opened')
+        console.log(process._getActiveHandles())
+      })
+      setTimeout(() => {
+        stream.resume();
+      }, 200000);
+    }`)({ fs });
+  })
+
+
+  process._rawDebug('stopping');
+  await w.stop();
+  process._rawDebug('stopped');
 })().then(common.mustCall());

@@ -1065,6 +1065,7 @@ void SynchronousWorker::TryCloseAllHandles(const FunctionCallbackInfo<Value>& ar
   if (self->env_ != nullptr) {
     auto env = self->env_;
     for (auto w : *env->handle_wrap_queue()) {
+      printf("loop\n");
       Local<Object> obj = w->GetOwner();
       Local<Context> localContext = obj->GetCreationContextChecked();
       if (localContext == self->context_) {
@@ -1073,7 +1074,7 @@ void SynchronousWorker::TryCloseAllHandles(const FunctionCallbackInfo<Value>& ar
       }
     }
   }
-  // printf("TryCloseAllHandles: %d\n", localHandleFound);
+  printf("TryCloseAllHandles: %d\n", localHandleFound);
   args.GetReturnValue().Set(v8::Boolean::New(self->isolate_, localHandleFound));
 }
 
