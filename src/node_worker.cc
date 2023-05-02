@@ -901,8 +901,6 @@ class SynchronousWorker final : public MemoryRetainer {
   static void New(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Start(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Load(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void RunLoop(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void IsLoopAlive(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SignalStop(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Stop(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void TryCloseAllHandles(const v8::FunctionCallbackInfo<v8::Value>& args);
@@ -932,19 +930,17 @@ class SynchronousWorker final : public MemoryRetainer {
   static void CleanupHook(void* arg);
   void OnExit(int code);
 
-  void Start(bool own_loop, bool own_microtaskqueue);
+  void Start();
   v8::MaybeLocal<v8::Value> Load(v8::Local<v8::Function> callback);
   v8::MaybeLocal<v8::Value> RunInCallbackScope(
       v8::Local<v8::Function> callback);
   void RunLoop(uv_run_mode mode);
-  bool IsLoopAlive();
   void SignalStop();
   void Stop(bool may_throw);
 
   Isolate* isolate_;
   Global<Object> wrap_;
 
-  uv_loop_t loop_;
   std::unique_ptr<v8::MicrotaskQueue> microtask_queue_;
   v8::Global<v8::Context> outer_context_;
   v8::Global<v8::Context> context_;
@@ -952,7 +948,6 @@ class SynchronousWorker final : public MemoryRetainer {
   Environment* env_ = nullptr;
   bool signaled_stop_ = false;
   bool can_be_terminated_ = false;
-  bool loop_is_running_ = false;
 };
 
 bool SynchronousWorker::HasInstance(Environment* env, Local<Value> value) {
@@ -972,8 +967,6 @@ Local<FunctionTemplate> SynchronousWorker::GetConstructorTemplate(
     SetProtoMethod(isolate, tmpl, "load", Load);
     SetProtoMethod(isolate, tmpl, "stop", Stop);
     SetProtoMethod(isolate, tmpl, "signalStop", SignalStop);
-    SetProtoMethod(isolate, tmpl, "runLoop", RunLoop);
-    SetProtoMethod(isolate, tmpl, "isLoopAlive", IsLoopAlive);
     SetProtoMethod(isolate, tmpl, "runInCallbackScope", RunInCallbackScope);
     SetProtoMethod(isolate, tmpl, "tryCloseAllHandles", TryCloseAllHandles);
 
@@ -989,10 +982,6 @@ void SynchronousWorker::Initialize(Environment* env,
                          "SynchronousWorker",
                          GetConstructorTemplate(env),
                          SetConstructorFunctionFlag::NONE);
-
-  NODE_DEFINE_CONSTANT(target, UV_RUN_DEFAULT);
-  NODE_DEFINE_CONSTANT(target, UV_RUN_ONCE);
-  NODE_DEFINE_CONSTANT(target, UV_RUN_NOWAIT);
 }
 
 void SynchronousWorker::RegisterExternalReferences(
@@ -1000,8 +989,6 @@ void SynchronousWorker::RegisterExternalReferences(
   registry->Register(New);
   registry->Register(Start);
   registry->Register(Load);
-  registry->Register(RunLoop);
-  registry->Register(IsLoopAlive);
   registry->Register(SignalStop);
   registry->Register(Stop);
   registry->Register(RunInCallbackScope);
@@ -1029,7 +1016,6 @@ Local<Context> SynchronousWorker::context() const {
 SynchronousWorker::SynchronousWorker(Environment* env, Local<Object> object)
     : isolate_(env->isolate()), wrap_(env->isolate(), object) {
   AddEnvironmentCleanupHook(env->isolate(), CleanupHook, this);
-  loop_.data = nullptr;
   object->SetAlignedPointerInInternalField(0, this);
 
   Local<Context> outer_context = env->context();
@@ -1055,8 +1041,7 @@ void SynchronousWorker::New(const FunctionCallbackInfo<Value>& args) {
 void SynchronousWorker::Start(const FunctionCallbackInfo<Value>& args) {
   SynchronousWorker* self = Unwrap(args);
   if (self == nullptr) return;
-  self->Start(args[0]->BooleanValue(args.GetIsolate()),
-              args[1]->BooleanValue(args.GetIsolate()));
+  self->Start();
 }
 
 void SynchronousWorker::TryCloseAllHandles(const FunctionCallbackInfo<Value>& args) {
@@ -1109,21 +1094,6 @@ void SynchronousWorker::Load(const FunctionCallbackInfo<Value>& args) {
   }
 }
 
-void SynchronousWorker::RunLoop(const FunctionCallbackInfo<Value>& args) {
-  SynchronousWorker* self = Unwrap(args);
-  if (self == nullptr) return;
-  int64_t mode;
-  if (!args[0]->IntegerValue(args.GetIsolate()->GetCurrentContext()).To(&mode))
-    return;
-  self->RunLoop(static_cast<uv_run_mode>(mode));
-}
-
-void SynchronousWorker::IsLoopAlive(const FunctionCallbackInfo<Value>& args) {
-  SynchronousWorker* self = Unwrap(args);
-  if (self == nullptr) return;
-  args.GetReturnValue().Set(self->IsLoopAlive());
-}
-
 void SynchronousWorker::RunInCallbackScope(
     const FunctionCallbackInfo<Value>& args) {
   SynchronousWorker* self = Unwrap(args);
@@ -1155,30 +1125,15 @@ MaybeLocal<Value> SynchronousWorker::RunInCallbackScope(Local<Function> fn) {
   return worker_scope.EscapeMaybe(ret);
 }
 
-void SynchronousWorker::Start(bool own_loop, bool own_microtaskqueue) {
+void SynchronousWorker::Start() {
   signaled_stop_ = false;
   Local<Context> outer_context = outer_context_.Get(isolate_);
   Environment* outer_env = GetCurrentEnvironment(outer_context);
   assert(outer_env != nullptr);
-  uv_loop_t* outer_loop = GetCurrentEventLoop(isolate_);
-  assert(outer_loop != nullptr);
-  USE(outer_loop);  // Exists only to silence a compiler warning.
+  uv_loop_t* loop = GetCurrentEventLoop(isolate_);
+  assert(loop != nullptr);
 
-  if (own_loop) {
-    int ret = uv_loop_init(&loop_);
-    if (ret != 0) {
-      isolate_->ThrowException(UVException(isolate_, ret, "uv_loop_init"));
-      return;
-    }
-    loop_.data = this;
-  }
-
-  MicrotaskQueue* microtask_queue =
-      own_microtaskqueue ? (microtask_queue_ = v8::MicrotaskQueue::New(
-                                isolate_, v8::MicrotasksPolicy::kExplicit))
-                               .get()
-                         : outer_context_.Get(isolate_)->GetMicrotaskQueue();
-  uv_loop_t* loop = own_loop ? &loop_ : GetCurrentEventLoop(isolate_);
+  MicrotaskQueue* microtask_queue = outer_context_.Get(isolate_)->GetMicrotaskQueue();
 
   Local<Context> context = Context::New(
       isolate_,
@@ -1256,13 +1211,6 @@ void SynchronousWorker::Stop(bool may_throw) {
 
   context_.Reset();
   outer_context_.Reset();
-  if (loop_.data != nullptr) {
-    loop_.data = nullptr;
-    int ret = uv_loop_close(&loop_);
-    if (ret != 0 && may_throw) {
-      isolate_->ThrowException(UVException(isolate_, ret, "uv_loop_close"));
-    }
-  }
   microtask_queue_.reset();
 
   RemoveEnvironmentCleanupHook(isolate_, CleanupHook, this);
@@ -1292,31 +1240,6 @@ MaybeLocal<Value> SynchronousWorker::Load(Local<Function> callback) {
 
 void SynchronousWorker::CleanupHook(void* arg) {
   static_cast<SynchronousWorker*>(arg)->Stop(false);
-}
-
-void SynchronousWorker::RunLoop(uv_run_mode mode) {
-  Environment* env = Environment::GetCurrent(isolate_);
-  if (loop_.data == nullptr || context_.IsEmpty() || signaled_stop_) {
-    return THROW_ERR_INVALID_STATE(env, "Worker has been stopped");
-  }
-  if (loop_is_running_) {
-    return THROW_ERR_INVALID_STATE(env, "Cannot nest calls to runLoop");
-  }
-  SynchronousWorkerScope worker_scope(this);
-  TryCatch try_catch(isolate_);
-  try_catch.SetVerbose(true);
-  SealHandleScope seal_handle_scope(isolate_);
-  loop_is_running_ = true;
-  uv_run(&loop_, mode);
-  loop_is_running_ = false;
-  if (signaled_stop_) {
-    isolate_->CancelTerminateExecution();
-  }
-}
-
-bool SynchronousWorker::IsLoopAlive() {
-  if (loop_.data == nullptr || signaled_stop_) return false;
-  return uv_loop_alive(&loop_);
 }
 
 void SynchronousWorker::MemoryInfo(MemoryTracker* tracker) const {
