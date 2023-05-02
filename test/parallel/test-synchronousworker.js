@@ -12,6 +12,7 @@ const {
 const {
   SynchronousWorker,
 } = require('node:worker_threads');
+const assert = require('node:assert');
 
 function deferred() {
   let res;
@@ -19,7 +20,6 @@ function deferred() {
   return { res, promise };
 }
 
-/*
 {
   const w = new SynchronousWorker();
 
@@ -293,14 +293,12 @@ function deferred() {
   });
   await w.stop();
 })().then(common.mustCall());
-*/
 
 (async function() {
   const w = new SynchronousWorker({
     sharedEventLoop: true,
     sharedMicrotaskQueue: true
   });
-  let ran = false;
   w.runInWorkerScope(() => {
     const req = w.createRequire(__filename);
     const vm = req('vm');
@@ -312,9 +310,7 @@ function deferred() {
         process._rawDebug('opened')
         console.log(process._getActiveHandles())
       })
-      setTimeout(() => {
-        stream.resume();
-      }, 200000);
+      setTimeout(() => {}, 200000);
     }`)({ fs });
   })
 

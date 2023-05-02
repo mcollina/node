@@ -1060,22 +1060,26 @@ void SynchronousWorker::Start(const FunctionCallbackInfo<Value>& args) {
 }
 
 void SynchronousWorker::TryCloseAllHandles(const FunctionCallbackInfo<Value>& args) {
-  auto localHandleFound = false;
+  auto count = 0;
   SynchronousWorker* self = Unwrap(args);
+  self->env_->async_hooks()->clear_async_id_stack();
+  printf("TryCloseAllHandles\n");
   if (self->env_ != nullptr) {
     auto env = self->env_;
     for (auto w : *env->handle_wrap_queue()) {
-      printf("loop\n");
-      Local<Object> obj = w->GetOwner();
-      Local<Context> localContext = obj->GetCreationContextChecked();
-      if (localContext == self->context_) {
-        localHandleFound = true;
-        w->Close();
-      }
+      // printf("loop handle wrap\n");
+      count++;
+      w->Close();
+    }
+
+    for (auto w : *env->req_wrap_queue()) {
+      // printf("loop req wrap\n");
+      count++;
+      w->Cancel();
     }
   }
-  printf("TryCloseAllHandles: %d\n", localHandleFound);
-  args.GetReturnValue().Set(v8::Boolean::New(self->isolate_, localHandleFound));
+  printf("TryCloseAllHandles: %d\n", count);
+  args.GetReturnValue().Set(v8::Number::New(self->isolate_, count));
 }
 
 void SynchronousWorker::Stop(const FunctionCallbackInfo<Value>& args) {
@@ -1204,8 +1208,7 @@ void SynchronousWorker::Start(bool own_loop, bool own_microtaskqueue) {
                            {},
                            {},
                            static_cast<EnvironmentFlags::Flags>(
-                               EnvironmentFlags::kTrackUnmanagedFds |
-                               EnvironmentFlags::kNoRegisterESMLoader),
+                               EnvironmentFlags::kTrackUnmanagedFds),
                            thread_id,
                            std::move(inspector_parent_handle));
   assert(env_ != nullptr);
@@ -1239,6 +1242,7 @@ void SynchronousWorker::SignalStop() {
 
 void SynchronousWorker::Stop(bool may_throw) {
   if (env_ != nullptr) {
+    env_->UntrackContext(PersistentToLocal::Weak(isolate_, context_));
     if (!signaled_stop_) {
       SignalStop();
       isolate_->CancelTerminateExecution();
@@ -1250,6 +1254,7 @@ void SynchronousWorker::Stop(bool may_throw) {
     FreeIsolateData(isolate_data_);
     isolate_data_ = nullptr;
   }
+
   context_.Reset();
   outer_context_.Reset();
   if (loop_.data != nullptr) {
