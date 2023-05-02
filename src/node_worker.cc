@@ -1242,7 +1242,6 @@ void SynchronousWorker::SignalStop() {
 
 void SynchronousWorker::Stop(bool may_throw) {
   if (env_ != nullptr) {
-    env_->UntrackContext(PersistentToLocal::Weak(isolate_, context_));
     if (!signaled_stop_) {
       SignalStop();
       isolate_->CancelTerminateExecution();
