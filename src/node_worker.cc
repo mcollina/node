@@ -1048,22 +1048,18 @@ void SynchronousWorker::TryCloseAllHandles(const FunctionCallbackInfo<Value>& ar
   auto count = 0;
   SynchronousWorker* self = Unwrap(args);
   self->env_->async_hooks()->clear_async_id_stack();
-  printf("TryCloseAllHandles\n");
   if (self->env_ != nullptr) {
     auto env = self->env_;
     for (auto w : *env->handle_wrap_queue()) {
-      // printf("loop handle wrap\n");
       count++;
       w->Close();
     }
 
     for (auto w : *env->req_wrap_queue()) {
-      // printf("loop req wrap\n");
       count++;
       w->Cancel();
     }
   }
-  printf("TryCloseAllHandles: %d\n", count);
   args.GetReturnValue().Set(v8::Number::New(self->isolate_, count));
 }
 
