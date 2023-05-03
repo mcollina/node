@@ -1,10 +1,8 @@
 #include "node_worker.h"
 #include "async_wrap-inl.h"
-#include "base_object.h"
 #include "debug_utils-inl.h"
 #include "histogram-inl.h"
 #include "memory_tracker-inl.h"
-#include "node.h"
 #include "node_buffer.h"
 #include "node_errors.h"
 #include "node_external_reference.h"
@@ -13,9 +11,6 @@
 #include "node_snapshot_builder.h"
 #include "permission/permission.h"
 #include "util-inl.h"
-#include "v8-local-handle.h"
-#include "v8-microtask-queue.h"
-#include "v8-snapshot.h"
 
 #include <memory>
 #include <string>
@@ -881,7 +876,6 @@ void Worker::LoopStartTime(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(loop_start_time / 1e6);
 }
 
-// ============================================================================
 namespace {
 
 // Return the MessagePort that is global for this Environment and communicates

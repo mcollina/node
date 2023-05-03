@@ -1473,7 +1473,7 @@ bool LocalWorker::HasInstance(Environment* env, Local<Value> value) {
 
 Local<FunctionTemplate> LocalWorker::GetConstructorTemplate(
     Environment* env) {
-  Local<FunctionTemplate> tmpl = env->synchronousworker_constructor_template();
+  Local<FunctionTemplate> tmpl = env->localworker_constructor_template();
   if (tmpl.IsEmpty()) {
     Isolate* isolate = env->isolate();
     tmpl = NewFunctionTemplate(isolate, New);
