@@ -1487,7 +1487,7 @@ Local<FunctionTemplate> LocalWorker::GetConstructorTemplate(
     SetProtoMethod(isolate, tmpl, "runInCallbackScope", RunInCallbackScope);
     SetProtoMethod(isolate, tmpl, "tryCloseAllHandles", TryCloseAllHandles);
 
-    env->set_synchronousworker_constructor_template(tmpl);
+    env->set_localworker_constructor_template(tmpl);
   }
   return tmpl;
 }
