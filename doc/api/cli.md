@@ -618,22 +618,6 @@ added:
 
 Use this flag to enable [ShadowRealm][] support.
 
-### `--experimental-synchronousworker`
-
-<!-- YAML
-added: REPLACEME
--->
-
-Enable experimental support for `worker_threads.SynchronousWorker`.
-
-### `--no-experimental-synchronousworker`
-
-<!-- YAML
-added: REPLACEME
--->
-
-Disable experimental support for `worker_threads.SynchronousWorker`.
-
 ### `--experimental-test-coverage`
 
 <!-- YAML
@@ -2131,7 +2115,6 @@ Node.js options that are allowed are:
 * `--experimental-policy`
 * `--experimental-shadow-realm`
 * `--experimental-specifier-resolution`
-* `--experimental-synchronousworker`
 * `--experimental-top-level-await`
 * `--experimental-vm-modules`
 * `--experimental-wasi-unstable-preview1`

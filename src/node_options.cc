@@ -448,13 +448,6 @@ EnvironmentOptionsParser::EnvironmentOptionsParser() {
             "experimental ES Module support in vm module",
             &EnvironmentOptions::experimental_vm_modules,
             kAllowedInEnvvar);
-  AddOption("--experimental-worker", "", NoOp{}, kAllowedInEnvironment);
-  AddOption("--experimental-report", "", NoOp{}, kAllowedInEnvironment);
-  AddOption("--experimental-synchronousworker",
-            "experimental SynchronousWorker support",
-            &EnvironmentOptions::experimental_synchronousworker,
-            kAllowedInEnvironment,
-            false);
   AddOption("--experimental-worker", "", NoOp{}, kAllowedInEnvvar);
   AddOption("--experimental-report", "", NoOp{}, kAllowedInEnvvar);
   AddOption(

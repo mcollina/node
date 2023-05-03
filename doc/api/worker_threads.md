@@ -1347,121 +1347,6 @@ from the running process and will preload the same preload scripts as the main
 thread. If the preload script unconditionally launches a worker thread, every
 thread spawned will spawn another until the application crashes.
 
-## Synchronous Workers
-
-> Stability: 1 - Experimental
-
-### Class: `SynchronousWorker`
-
-<!-- YAML
-added: REPLACEME
--->
-
-* Extends: {EventEmitter}
-
-A `SynchronousWorker` is effectively a Node.js environment that runs within the
-same thread.
-
-```mjs
-import { SynchronousWorker } from 'node:worker_threads';
-import { fileURLToPath } from 'url';
-const w = new SynchronousWorker();
-const myAsyncFunction = w.createRequire(fileURLToPath(import.meta.url))('my-module');
-console.log(await myAsyncFunction());
-```
-
-#### `new SynchronousWorker()`
-
-<!-- YAML
-added: REPLACEME
--->
-
-#### `synchronousWorker.runInWorkerScope(fn)`
-
-<!-- YAML
-added: REPLACEME
--->
-
-* `fn` {Function}
-
-Wrap `fn` and run it as if it were run on the event loop of the inner Node.js
-instance. In particular, this ensures that Promises created by the function
-itself are resolved correctly. You should generally use this to run any code
-inside the innert Node.js instance that performs asynchronous activity and that
-is not already running in an asynchronous context (you can compare this to
-the code that runs synchronously from the main file of a Node.js application).
-
-#### `synchronousWorker.stop()`
-
-<!-- YAML
-added: REPLACEME
--->
-
-This will render the Node.js instance unusable
-and is generally comparable to running `process.exit()`.
-
-This method returns a `Promise` that will be resolved when all resources
-associated with this Node.js instance are released. This `Promise` resolves on
-the event loop of the _outer_ Node.js instance.
-
-#### `synchronousWorker.createRequire(filename)`
-
-<!-- YAML
-added: REPLACEME
--->
-
-* `filename` {string}
-
-Create a `require()` function that can be used for loading code inside the
-inner Node.js instance.
-
-#### `synchronousWorker.globalThis`
-
-<!-- YAML
-added: REPLACEME
--->
-
-* Type: {Object}
-
-Returns a reference to the global object of the inner Node.js instance.
-
-#### `synchronousWorker.process`
-
-<!-- YAML
-added: REPLACEME
--->
-
-* Type: {Object}
-
-Returns a reference to the `process` object of the inner Node.js instance.
-
-### FAQ
-
-#### What does a SynchronousWorker do?
-
-Creates a new Node.js instance, using the same thread and the same JS heap.
-You can create Node.js API objects, like network sockets, inside the new
-Node.js instance.
-
-#### Where did SynchronousWorker come from?
-
-`SynchronousWorker` was originally developer by Node.js core contributor
-Anna Henningsen and published as a separate module [`synchronous-worker`][] on
-npm under the MIT license. It was integrated into Node.js core with Anna's
-permission. The majority of the code, documentation, and tests were adopted
-almost verbatim from the original module.
-
-#### Why would I use a SynchronousWorker?
-
-The most common use case is to create a separated Node.js environemnt running
-within the same thread. This is useful for testing and hot reloading.
-
-#### How can I avoid using SynchronousWorker?
-
-If you do not need to directly interact with the objects inside the inner
-Node.js instance, a lot of the time Worker threads together with
-[`Atomics.wait()`][] will give you what you need.
-
 [Addons worker support]: addons.md#worker-support
 [ECMAScript module loader]: esm.md#data-imports
 [HTML structured clone algorithm]: https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm
@@ -1474,7 +1359,6 @@ Node.js instance, a lot of the time Worker threads together with
 [`--max-semi-space-size`]: cli.md#--max-semi-space-sizesize-in-megabytes
 [`ArrayBuffer`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/ArrayBuffer
 [`AsyncResource`]: async_hooks.md#class-asyncresource
-[`Atomics.wait()`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/wait
 [`Buffer.allocUnsafe()`]: buffer.md#static-method-bufferallocunsafesize
 [`Buffer`]: buffer.md
 [`ERR_MISSING_MESSAGE_PORT_IN_TRANSFER_LIST`]: errors.md#err_missing_message_port_in_transfer_list
@@ -1512,7 +1396,6 @@ Node.js instance, a lot of the time Worker threads together with
 [`require('node:worker_threads').parentPort`]: #workerparentport
 [`require('node:worker_threads').threadId`]: #workerthreadid
 [`require('node:worker_threads').workerData`]: #workerworkerdata
-[`synchronous-worker`]: https://github.com/addaleax/synchronous-worker
 [`trace_events`]: tracing.md
 [`v8.getHeapSnapshot()`]: v8.md#v8getheapsnapshotoptions
 [`vm`]: vm.md

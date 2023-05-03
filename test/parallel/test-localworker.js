@@ -1,17 +1,16 @@
-// Flags: --experimental-synchronousworker
 'use strict';
 
 const common = require('../common');
 const { strictEqual } = require('node:assert');
 
 const {
-  SynchronousWorker,
-} = require('node:worker_threads');
+  LocalWorker,
+} = require('node:vm');
 
 // Properly handles timers that are about to expire when FreeEnvironment() is called on
 // a shared event loop
 (async function() {
-  const w = new SynchronousWorker();
+  const w = new LocalWorker();
 
   setImmediate(() => {
     setTimeout(() => {}, 20);
@@ -22,7 +21,7 @@ const {
 })().then(common.mustCall());
 
 (async function() {
-  const w = new SynchronousWorker();
+  const w = new LocalWorker();
 
   setImmediate(() => {
     setImmediate(() => {
@@ -33,7 +32,7 @@ const {
 })().then(common.mustCall());
 
 (async function() {
-  const w = new SynchronousWorker();
+  const w = new LocalWorker();
 
   setImmediate(() => {
     setTimeout(() => {}, 20);
@@ -44,11 +43,11 @@ const {
 })().then(common.mustCall());
 
 (async function() {
-  const w = new SynchronousWorker();
-  let called = false
+  const w = new LocalWorker();
+  let called = false;
 
   function cb() {
-    called = true
+    called = true;
   }
   w.runInWorkerScope(() => {
     const req = w.createRequire(__filename);
