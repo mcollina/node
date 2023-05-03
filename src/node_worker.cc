@@ -903,7 +903,8 @@ class SynchronousWorker final : public MemoryRetainer {
   static void Load(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void SignalStop(const v8::FunctionCallbackInfo<v8::Value>& args);
   static void Stop(const v8::FunctionCallbackInfo<v8::Value>& args);
-  static void TryCloseAllHandles(const v8::FunctionCallbackInfo<v8::Value>& args);
+  static void TryCloseAllHandles(
+      const v8::FunctionCallbackInfo<v8::Value>& args);
   static void RunInCallbackScope(
       const v8::FunctionCallbackInfo<v8::Value>& args);
 
@@ -1044,7 +1045,8 @@ void SynchronousWorker::Start(const FunctionCallbackInfo<Value>& args) {
   self->Start();
 }
 
-void SynchronousWorker::TryCloseAllHandles(const FunctionCallbackInfo<Value>& args) {
+void SynchronousWorker::TryCloseAllHandles(
+    const FunctionCallbackInfo<Value>& args) {
   auto count = 0;
   SynchronousWorker* self = Unwrap(args);
   self->env_->async_hooks()->clear_async_id_stack();
@@ -1129,7 +1131,8 @@ void SynchronousWorker::Start() {
   uv_loop_t* loop = GetCurrentEventLoop(isolate_);
   assert(loop != nullptr);
 
-  MicrotaskQueue* microtask_queue = outer_context_.Get(isolate_)->GetMicrotaskQueue();
+  MicrotaskQueue* microtask_queue =
+    outer_context_.Get(isolate_)->GetMicrotaskQueue();
 
   Local<Context> context = Context::New(
       isolate_,

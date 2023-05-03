@@ -2,23 +2,11 @@
 'use strict';
 
 const common = require('../common');
-const { once } = require('node:events');
-
-const {
-  strictEqual,
-  throws,
-} = require('node:assert');
+const { strictEqual } = require('node:assert');
 
 const {
   SynchronousWorker,
 } = require('node:worker_threads');
-const assert = require('node:assert');
-
-function deferred() {
-  let res;
-  const promise = new Promise((resolve) => res = resolve);
-  return { res, promise };
-}
 
 // Properly handles timers that are about to expire when FreeEnvironment() is called on
 // a shared event loop
@@ -57,22 +45,26 @@ function deferred() {
 
 (async function() {
   const w = new SynchronousWorker();
+  let called = false
+
+  function cb() {
+    called = true
+  }
   w.runInWorkerScope(() => {
     const req = w.createRequire(__filename);
     const vm = req('vm');
     const fs = req('fs');
 
-    vm.runInThisContext(`({ fs }) => {
+    vm.runInThisContext(`({ fs, cb }) => {
       const stream = fs.createReadStream('${__filename}');
       stream.on('open', () => {
-        process._rawDebug('opened')
-        console.log(process._getActiveHandles())
+        cb()
       })
-      setTimeout(() => {}, 200000);
-    }`)({ fs });
-  })
 
-  process._rawDebug('stopping');
+      setTimeout(() => {}, 200000);
+    }`)({ fs, cb });
+  });
+
   await w.stop();
-  process._rawDebug('stopped');
+  strictEqual(called, true);
 })().then(common.mustCall());
