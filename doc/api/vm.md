@@ -1589,7 +1589,7 @@ A `LocalWorker` is effectively a Node.js environment that runs within the
 same thread.
 
 ```mjs
-import { LocalWorker } from 'node:worker_threads';
+import { LocalWorker } from 'vm';
 import { fileURLToPath } from 'url';
 const w = new LocalWorker();
 const myAsyncFunction = w.createRequire(fileURLToPath(import.meta.url))('my-module');
