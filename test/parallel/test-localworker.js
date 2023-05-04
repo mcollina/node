@@ -68,3 +68,29 @@ const {
   await w.stop();
   strictEqual(called, true);
 })().then(common.mustCall());
+
+(async function() {
+  const w = new LocalWorker();
+  let called = false;
+
+  function cb() {
+    called = true;
+  }
+  w.runInWorkerScope(async () => {
+    const _import = await w.createImport(__filename);
+    const vm = await _import('vm');
+    const fs = await _import('fs');
+
+    vm.runInThisContext(`({ fs, cb }) => {
+      const stream = fs.createReadStream('${__filename}');
+      stream.on('open', () => {
+        cb()
+      })
+
+      setTimeout(() => {}, 200000);
+    }`)({ fs, cb });
+  });
+
+  await w.stop();
+  strictEqual(called, true);
+})().then(common.mustCall());

@@ -1638,8 +1638,19 @@ added: REPLACEME
 
 * `filename` {string}
 
-Create a `require()` function that can be used for loading code inside the
-inner Node.js instance.
+Create a `require()` function that can be used for loading CommonJS modules
+inside the inner Node.js instance.
+
+#### `synchronousWorker.createImport(filename)`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* `filename` {string}
+
+Create a dynamic `import()` function that can be used for loading EcmaScript
+modules inside the inner Node.js instance.
 
 #### `synchronousWorker.globalThis`
 
@@ -1661,33 +1672,6 @@ added: REPLACEME
 
 Returns a reference to the `process` object of the inner Node.js instance.
 
-### FAQ
-
-#### What does a LocalWorker do?
-
-Creates a new Node.js instance, using the same thread and the same JS heap.
-You can create Node.js API objects, like network sockets, inside the new
-Node.js instance.
-
-#### Where did LocalWorker come from?
-
-`LocalWorker` was originally developer by Node.js core contributor
-Anna Henningsen and published as a separate module [`synchronous-worker`][] on
-npm under the MIT license. It was integrated into Node.js core with Anna's
-permission. The majority of the code, documentation, and tests were adopted
-almost verbatim from the original module.
-
-#### Why would I use a LocalWorker?
-
-The most common use case is to create a separated Node.js environemnt running
-within the same thread. This is useful for testing and hot reloading.
-
-#### How can I avoid using LocalWorker?
-
-If you do not need to directly interact with the objects inside the inner
-Node.js instance, a lot of the time Worker threads together with
-[`Atomics.wait()`][] will give you what you need.
-
 [Cyclic Module Record]: https://tc39.es/ecma262/#sec-cyclic-module-records
 [ECMAScript Module Loader]: esm.md#modules-ecmascript-modules
 [Evaluate() concrete method]: https://tc39.es/ecma262/#sec-moduleevaluation
@@ -1698,7 +1682,6 @@ Node.js instance, a lot of the time Worker threads together with
 [Source Text Module Record]: https://tc39.es/ecma262/#sec-source-text-module-records
 [Synthetic Module Record]: https://heycam.github.io/webidl/#synthetic-module-records
 [V8 Embedder's Guide]: https://v8.dev/docs/embed#contexts
-[`Atomics.wait()`]: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Atomics/wait
 [`ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING`]: errors.md#err_vm_dynamic_import_callback_missing
 [`ERR_VM_MODULE_STATUS`]: errors.md#err_vm_module_status
 [`Error`]: errors.md#class-error
@@ -1707,7 +1690,6 @@ Node.js instance, a lot of the time Worker threads together with
 [`optionsExpression`]: https://tc39.es/proposal-import-assertions/#sec-evaluate-import-call
 [`script.runInContext()`]: #scriptrunincontextcontextifiedobject-options
 [`script.runInThisContext()`]: #scriptruninthiscontextoptions
-[`synchronous-worker`]: https://github.com/addaleax/synchronous-worker
 [`url.origin`]: url.md#urlorigin
 [`vm.createContext()`]: #vmcreatecontextcontextobject-options
 [`vm.runInContext()`]: #vmrunincontextcode-contextifiedobject-options
