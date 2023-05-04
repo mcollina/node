@@ -465,8 +465,8 @@ The available permissions are documented by the [`--experimental-permission`][]
 flag.
 
 When starting Node.js with `--experimental-permission`,
-the ability to access the file system, spawn processes, and
-use `node:worker_threads` will be restricted.
+the ability to access the file system through the `fs` module, spawn processes,
+and use `node:worker_threads` will be restricted.
 
 ```console
 $ node --experimental-permission index.js
@@ -536,7 +536,7 @@ Example:
 
 Wildcards are supported too:
 
-* `--allow-fs-read:/home/test*` will allow read access to everything
+* `--allow-fs-read=/home/test*` will allow read access to everything
   that matches the wildcard. e.g: `/home/test/file1` or `/home/test2`
 
 There are constraints you need to know before using this system:

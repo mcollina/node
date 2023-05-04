@@ -1,4 +1,5 @@
 #include "encoding_binding.h"
+#include "ada.h"
 #include "env-inl.h"
 #include "node_errors.h"
 #include "node_external_reference.h"
@@ -15,10 +16,12 @@ using v8::ArrayBuffer;
 using v8::BackingStore;
 using v8::Context;
 using v8::FunctionCallbackInfo;
+using v8::FunctionTemplate;
 using v8::Isolate;
 using v8::Local;
 using v8::MaybeLocal;
 using v8::Object;
+using v8::ObjectTemplate;
 using v8::String;
 using v8::Uint8Array;
 using v8::Value;
@@ -193,18 +196,45 @@ void BindingData::DecodeUTF8(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(ret);
 }
 
-void BindingData::Initialize(Local<Object> target,
-                             Local<Value> unused,
-                             Local<Context> context,
-                             void* priv) {
-  Realm* realm = Realm::GetCurrent(context);
-  BindingData* const binding_data =
-      realm->AddBindingData<BindingData>(context, target);
-  if (binding_data == nullptr) return;
+void BindingData::ToASCII(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  CHECK_GE(args.Length(), 1);
+  CHECK(args[0]->IsString());
 
-  SetMethod(context, target, "encodeInto", EncodeInto);
-  SetMethodNoSideEffect(context, target, "encodeUtf8String", EncodeUtf8String);
-  SetMethodNoSideEffect(context, target, "decodeUTF8", DecodeUTF8);
+  Utf8Value input(env->isolate(), args[0]);
+  auto out = ada::idna::to_ascii(input.ToStringView());
+  args.GetReturnValue().Set(
+      String::NewFromUtf8(env->isolate(), out.c_str()).ToLocalChecked());
+}
+
+void BindingData::ToUnicode(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  Environment* env = Environment::GetCurrent(args);
+  CHECK_GE(args.Length(), 1);
+  CHECK(args[0]->IsString());
+
+  Utf8Value input(env->isolate(), args[0]);
+  auto out = ada::idna::to_unicode(input.ToStringView());
+  args.GetReturnValue().Set(
+      String::NewFromUtf8(env->isolate(), out.c_str()).ToLocalChecked());
+}
+
+void BindingData::CreatePerIsolateProperties(IsolateData* isolate_data,
+                                             Local<FunctionTemplate> ctor) {
+  Isolate* isolate = isolate_data->isolate();
+  Local<ObjectTemplate> target = ctor->InstanceTemplate();
+  SetMethod(isolate, target, "encodeInto", EncodeInto);
+  SetMethodNoSideEffect(isolate, target, "encodeUtf8String", EncodeUtf8String);
+  SetMethodNoSideEffect(isolate, target, "decodeUTF8", DecodeUTF8);
+  SetMethodNoSideEffect(isolate, target, "toASCII", ToASCII);
+  SetMethodNoSideEffect(isolate, target, "toUnicode", ToUnicode);
+}
+
+void BindingData::CreatePerContextProperties(Local<Object> target,
+                                             Local<Value> unused,
+                                             Local<Context> context,
+                                             void* priv) {
+  Realm* realm = Realm::GetCurrent(context);
+  realm->AddBindingData<BindingData>(context, target);
 }
 
 void BindingData::RegisterTimerExternalReferences(
@@ -212,13 +242,19 @@ void BindingData::RegisterTimerExternalReferences(
   registry->Register(EncodeInto);
   registry->Register(EncodeUtf8String);
   registry->Register(DecodeUTF8);
+  registry->Register(ToASCII);
+  registry->Register(ToUnicode);
 }
 
 }  // namespace encoding_binding
 }  // namespace node
 
 NODE_BINDING_CONTEXT_AWARE_INTERNAL(
-    encoding_binding, node::encoding_binding::BindingData::Initialize)
+    encoding_binding,
+    node::encoding_binding::BindingData::CreatePerContextProperties)
+NODE_BINDING_PER_ISOLATE_INIT(
+    encoding_binding,
+    node::encoding_binding::BindingData::CreatePerIsolateProperties)
 NODE_BINDING_EXTERNAL_REFERENCE(
     encoding_binding,
     node::encoding_binding::BindingData::RegisterTimerExternalReferences)

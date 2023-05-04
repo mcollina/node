@@ -678,11 +678,8 @@ class WPTRunner {
     }
 
     process.on('exit', () => {
-      if (this.inProgress.size > 0) {
-        for (const id of this.inProgress) {
-          const spec = this.specs.get(id);
-          this.fail(spec, { name: 'Unknown' }, kIncomplete);
-        }
+      for (const spec of this.inProgress) {
+        this.fail(spec, { name: 'Unknown' }, kIncomplete);
       }
       inspect.defaultOptions.depth = Infinity;
       // Sorts the rules to have consistent output
@@ -780,7 +777,6 @@ class WPTRunner {
   /**
    * Report the status of each specific test case (there could be multiple
    * in one test file).
-   *
    * @param {WPTTestSpec} spec
    * @param {Test} test  The Test object returned by WPT harness
    */
@@ -795,7 +791,6 @@ class WPTRunner {
 
   /**
    * Report the status of each WPT test (one per file)
-   *
    * @param {WPTTestSpec} spec
    * @param {object} harnessStatus - The status object returned by WPT harness.
    */

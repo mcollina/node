@@ -428,10 +428,6 @@ if (anAlwaysFalseCondition) {
 The test runner's code coverage functionality has the following limitations,
 which will be addressed in a future Node.js release:
 
-* Although coverage data is collected for child processes, this information is
-  not included in the coverage report. Because the command line test runner uses
-  child processes to execute test files, it cannot be used with
-  `--experimental-test-coverage`.
 * Source maps are not supported.
 * Excluding specific files or directories from the coverage report is not
   supported.
@@ -732,7 +728,7 @@ added:
   - v18.9.0
   - v16.19.0
 changes:
-  - version: REPLACEME
+  - version: v20.1.0
     pr-url: https://github.com/nodejs/node/pull/47628
     description: Add a testNamePatterns option.
 -->
@@ -812,9 +808,8 @@ changes:
   properties are supported:
   * `concurrency` {number|boolean} If a number is provided,
     then that many tests would run in parallel within the application thread.
-    If `true`, it would run `os.availableParallelism() - 1` tests in parallel.
-    For subtests, it will be `Infinity` tests in parallel.
-    If `false`, it would only run one test at a time.
+    If `true`, all scheduled asynchronous tests run concurrently within the
+    thread. If `false`, only one test runs at a time.
     If unspecified, subtests inherit this value from their parent.
     **Default:** `false`.
   * `only` {boolean} If truthy, and the test context is configured to run
@@ -1515,7 +1510,7 @@ added:
   - v18.0.0
   - v16.17.0
 changes:
-  - version: REPLACEME
+  - version: v20.1.0
     pr-url: https://github.com/nodejs/node/pull/47586
     description: The `before` function was added to TestContext.
 -->
@@ -1527,7 +1522,7 @@ exposed as part of the API.
 ### `context.before([fn][, options])`
 
 <!-- YAML
-added: REPLACEME
+added: v20.1.0
 -->
 
 * `fn` {Function|AsyncFunction} The hook function. The first argument
