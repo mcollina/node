@@ -1,6 +1,6 @@
 'use strict';
 
-const common = require('../common');
+require('../common');
 const assert = require('assert');
 const fs = require('fs');
 
@@ -212,4 +212,3 @@ const fs = require('fs');
     myVfs.realpathSync('/nonexistent');
   }, { code: 'ENOENT' });
 }
-

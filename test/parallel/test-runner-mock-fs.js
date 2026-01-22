@@ -1,9 +1,9 @@
 'use strict';
 
-const common = require('../common');
+require('../common');
 const assert = require('assert');
 const fs = require('fs');
-const { test, describe, it, beforeEach, afterEach } = require('node:test');
+const { test } = require('node:test');
 
 // Test basic mock.fs() functionality
 test('mock.fs() creates a virtual file system', (t) => {
@@ -90,7 +90,7 @@ test('mock.fs() existsSync works correctly', (t) => {
 // Test mock.fs() with Buffer content
 test('mock.fs() supports Buffer content', (t) => {
   const binaryData = Buffer.from([0x00, 0x01, 0x02, 0x03]);
-  const mockFs = t.mock.fs({
+  t.mock.fs({
     prefix: '/buffer-test',
     files: {
       '/binary.bin': binaryData,
@@ -105,7 +105,7 @@ test('mock.fs() supports Buffer content', (t) => {
 test('mock.fs() is automatically cleaned up after test', async (t) => {
   // Create a mock within a subtest
   await t.test('subtest with mock', (st) => {
-    const mockFs = st.mock.fs({
+    st.mock.fs({
       prefix: '/cleanup-test',
       files: {
         '/temp.txt': 'temporary',
@@ -174,7 +174,7 @@ test('mock.fs() supports dynamic file content', (t) => {
 
 // Test require from mock.fs()
 test('mock.fs() supports require() from virtual files', (t) => {
-  const mockFs = t.mock.fs({
+  t.mock.fs({
     prefix: '/require-test',
     files: {
       '/module.js': 'module.exports = { value: 42 };',
@@ -208,12 +208,12 @@ test('mock.fs() supports statSync', (t) => {
 
 // Test multiple mock.fs() instances
 test('multiple mock.fs() instances can coexist', (t) => {
-  const mock1 = t.mock.fs({
+  t.mock.fs({
     prefix: '/mock1',
     files: { '/file.txt': 'from mock1' },
   });
 
-  const mock2 = t.mock.fs({
+  t.mock.fs({
     prefix: '/mock2',
     files: { '/file.txt': 'from mock2' },
   });
@@ -226,11 +226,11 @@ test('multiple mock.fs() instances can coexist', (t) => {
 test('mock.fs() validates options', (t) => {
   assert.throws(
     () => t.mock.fs('invalid'),
-    { code: 'ERR_INVALID_ARG_TYPE' }
+    { code: 'ERR_INVALID_ARG_TYPE' },
   );
 
   assert.throws(
     () => t.mock.fs({ files: 'invalid' }),
-    { code: 'ERR_INVALID_ARG_TYPE' }
+    { code: 'ERR_INVALID_ARG_TYPE' },
   );
 });

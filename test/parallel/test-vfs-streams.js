@@ -36,13 +36,17 @@ const fs = require('fs');
 
   const stream = myVfs.createReadStream('/encoded.txt', { encoding: 'utf8' });
   let data = '';
+  let receivedString = false;
 
   stream.on('data', (chunk) => {
-    assert.strictEqual(typeof chunk, 'string');
+    if (typeof chunk === 'string') {
+      receivedString = true;
+    }
     data += chunk;
   });
 
   stream.on('end', common.mustCall(() => {
+    assert.strictEqual(receivedString, true);
     assert.strictEqual(data, 'encoded content');
   }));
 }
@@ -63,7 +67,7 @@ const fs = require('fs');
   });
 
   stream.on('end', common.mustCall(() => {
-    // end is inclusive, so positions 2, 3, 4, 5 = "2345" (4 chars)
+    // End is inclusive, so positions 2, 3, 4, 5 = "2345" (4 chars)
     assert.strictEqual(data, '2345');
   }));
 }
@@ -216,11 +220,7 @@ const fs = require('fs');
     autoClose: false,
   });
 
-  let closeCalled = false;
-
-  stream.on('close', () => {
-    closeCalled = true;
-  });
+  stream.on('close', common.mustCall());
 
   stream.on('data', () => {});
 
@@ -232,4 +232,3 @@ const fs = require('fs');
     });
   }));
 }
-

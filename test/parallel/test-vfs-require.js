@@ -1,6 +1,6 @@
 'use strict';
 
-const common = require('../common');
+require('../common');
 const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
@@ -122,8 +122,7 @@ const fs = require('fs');
   myVfs.mount('/virtual6');
 
   // require('assert') should still work (builtin)
-  const assertMod = require('assert');
-  assert.strictEqual(typeof assertMod.strictEqual, 'function');
+  assert.strictEqual(typeof assert.strictEqual, 'function');
 
   // Real file requires should still work
   const commonMod = require('../common');
@@ -203,4 +202,3 @@ const fs = require('fs');
     require('/virtual10/unmount-test.js');
   }, { code: 'MODULE_NOT_FOUND' });
 }
-

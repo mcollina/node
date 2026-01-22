@@ -14,7 +14,6 @@ skipIfSingleExecutableIsNotSupported();
 const tmpdir = require('../common/tmpdir');
 const { writeFileSync } = require('fs');
 const { spawnSyncAndAssert } = require('../common/child_process');
-const { join } = require('path');
 
 const configFile = tmpdir.resolve('sea-config.json');
 const seaPrepBlob = tmpdir.resolve('sea-prep.blob');
@@ -119,7 +118,7 @@ spawnSyncAndAssert(
   process.execPath,
   ['--experimental-sea-config', 'sea-config.json'],
   { cwd: tmpdir.path },
-  {}
+  {},
 );
 
 // Generate the SEA executable
@@ -137,5 +136,5 @@ spawnSyncAndAssert(
   },
   {
     stdout: /All SEA VFS tests passed!/,
-  }
+  },
 );

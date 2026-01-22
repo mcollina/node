@@ -316,4 +316,3 @@ const fs = require('fs');
   myVfs.closeSync(fd1);
   myVfs.closeSync(fd2);
 }
-

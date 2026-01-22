@@ -92,9 +92,9 @@ const fs = require('fs');
   myVfs.addFile('/promise-src/c.js', 'const c = 3;');
   myVfs.mount('/promise-virtual');
 
-  const { glob } = require('fs/promises');
+  const { glob } = require('node:fs/promises');
 
-  // glob returns an async iterator, need to collect results
+  // Glob returns an async iterator, need to collect results
   const tsFiles = [];
   for await (const file of glob('/promise-virtual/promise-src/*.ts')) {
     tsFiles.push(file);
@@ -194,4 +194,3 @@ const fs = require('fs');
 
   myVfs.unmount();
 }
-

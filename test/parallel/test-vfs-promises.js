@@ -297,4 +297,3 @@ const fs = require('fs');
   const data2 = await myVfs.promises.readFile('/async-counter.txt', 'utf8');
   assert.strictEqual(data2, 'count: 2');
 })().then(common.mustCall());
-

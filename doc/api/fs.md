@@ -8294,7 +8294,7 @@ added: REPLACEME
 > Stability: 1 - Experimental
 
 The virtual file system (VFS) allows creating in-memory file system overlays
-that integrate seamlessly with Node.js's `fs` module and module loader. Virtual
+that integrate seamlessly with the Node.js `fs` module and module loader. Virtual
 files and directories can be accessed using standard `fs` operations and can be
 `require()`d or `import`ed like regular files.
 
@@ -8384,6 +8384,7 @@ added: REPLACEME
   returns the content.
 
 Adds a virtual file. The `content` can be:
+
 * A `string` or `Buffer` for static content
 * A synchronous function `() => string|Buffer` for dynamic content
 * An async function `async () => string|Buffer` for async dynamic content
@@ -8628,6 +8629,7 @@ stream.on('end', () => console.log('Done'));
 ```
 
 The readable stream supports the following options:
+
 * `encoding` {string} Character encoding for string output.
 * `start` {integer} Byte position to start reading from.
 * `end` {integer} Byte position to stop reading at (inclusive).
@@ -8637,7 +8639,7 @@ The readable stream supports the following options:
 ### Module loading from VFS
 
 Virtual files can be loaded as modules using `require()` or `import`. The VFS
-integrates with Node.js's module loaders automatically when mounted or in
+integrates with the Node.js module loaders automatically when mounted or in
 overlay mode.
 
 ```cjs
@@ -8711,10 +8713,12 @@ fs.glob('/virtual/src/*.js', (err, matches) => {
 });
 
 // Async glob with promises (returns async iterator)
-const { glob } = require('fs/promises');
-for await (const file of glob('/virtual/src/**/*.js')) {
-  console.log(file);
-}
+const { glob } = require('node:fs/promises');
+(async () => {
+  for await (const file of glob('/virtual/src/**/*.js')) {
+    console.log(file);
+  }
+})();
 ```
 
 ### SEA (Single Executable Application) integration
