@@ -199,13 +199,11 @@ const vfs = require('node:vfs');
   myVfs.unmount();
 
   // After unmounting, the file should not be found
-  // Note: Module path cache may still have the entry, so we get ENOENT
-  // from fs.readFileSync rather than MODULE_NOT_FOUND
   assert.throws(() => {
     // Clear require cache first
     delete require.cache['/virtual10/unmount-test.js'];
     require('/virtual10/unmount-test.js');
-  }, { code: 'ENOENT' });
+  }, { code: 'MODULE_NOT_FOUND' });
 }
 
 console.log('All VFS require tests passed');
