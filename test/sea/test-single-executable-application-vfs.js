@@ -9,7 +9,7 @@ const {
 
 skipIfSingleExecutableIsNotSupported();
 
-// This tests the SEA VFS integration - fs.getSeaVfs() and fs.hasSeaAssets()
+// This tests the SEA VFS integration - sea.getVfs() and sea.hasAssets()
 
 const tmpdir = require('../common/tmpdir');
 const { writeFileSync } = require('fs');
@@ -23,15 +23,16 @@ const outputFile = tmpdir.resolve(process.platform === 'win32' ? 'sea.exe' : 'se
 const seaMain = `
 'use strict';
 const fs = require('fs');
+const sea = require('node:sea');
 const assert = require('assert');
 
 // Test hasSeaAssets() returns true when we have assets
-const hasAssets = fs.hasSeaAssets();
+const hasAssets = sea.hasAssets();
 assert.strictEqual(hasAssets, true, 'hasSeaAssets() should return true');
 console.log('hasSeaAssets:', hasAssets);
 
 // Test getSeaVfs() returns a VFS instance
-const vfs = fs.getSeaVfs();
+const vfs = sea.getVfs();
 assert.ok(vfs !== null, 'getSeaVfs() should not return null');
 console.log('getSeaVfs returned VFS instance');
 
@@ -75,7 +76,7 @@ assert.strictEqual(mathModule.multiply(4, 5), 20, 'math.multiply should work');
 console.log('require from VFS tests passed');
 
 // Test getSeaVfs with custom prefix
-const customVfs = fs.getSeaVfs({ prefix: '/custom' });
+const customVfs = sea.getVfs({ prefix: '/custom' });
 // Note: getSeaVfs is a singleton, so it returns the same instance
 // with the same mount point (/sea) regardless of options passed after first call
 assert.strictEqual(customVfs, vfs, 'Should return the same cached instance');

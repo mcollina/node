@@ -251,11 +251,12 @@ To use the VFS with SEA:
 
 ```cjs
 const fs = require('node:fs');
+const sea = require('node:sea');
 
 // Check if SEA assets are available
-if (fs.hasSeaAssets()) {
+if (sea.hasAssets()) {
   // Initialize and mount the SEA VFS
-  const vfs = fs.getSeaVfs();
+  const vfs = sea.getVfs();
 
   // Now you can use standard fs APIs to read bundled assets
   const config = JSON.parse(fs.readFileSync('/sea/config.json', 'utf8'));
@@ -290,11 +291,11 @@ built-in modules. To load JavaScript modules bundled as assets, you must use
 [`module.createRequire()`][]:
 
 ```cjs
-const fs = require('node:fs');
 const { createRequire } = require('node:module');
+const sea = require('node:sea');
 
 // Initialize VFS
-fs.getSeaVfs();
+sea.getVfs();
 
 // Create a require function that works with VFS
 const seaRequire = createRequire('/sea/');
@@ -313,13 +314,16 @@ By default, the VFS is mounted at `/sea`. You can specify a custom prefix
 when initializing the VFS:
 
 ```cjs
-const vfs = fs.getSeaVfs({ prefix: '/app' });
+const fs = require('node:fs');
+const sea = require('node:sea');
+
+const vfs = sea.getSeaVfs({ prefix: '/app' });
 
 // Assets are now accessible under /app
 const config = fs.readFileSync('/app/config.json', 'utf8');
 ```
 
-Note: `fs.getSeaVfs()` returns a singleton. The `prefix` option is only used
+Note: `sea.getVfs()` returns a singleton. The `prefix` option is only used
 on the first call; subsequent calls return the same cached instance.
 
 ### Startup snapshot support

@@ -8864,92 +8864,12 @@ const { glob } = require('node:fs/promises');
 })();
 ```
 
-### SEA (Single Executable Application) integration
-
-When running as a Single Executable Application, the VFS can automatically
-provide access to embedded assets through standard file system APIs.
-
-#### `fs.hasSeaAssets()`
-
-<!-- YAML
-added: REPLACEME
--->
-
-* Returns: {boolean}
-
-Returns `true` if running as a SEA with embedded assets, `false` otherwise.
-
-```cjs
-const fs = require('node:fs');
-
-if (fs.hasSeaAssets()) {
-  console.log('Running as SEA with assets');
-}
-```
-
-#### `fs.getSeaVfs([options])`
-
-<!-- YAML
-added: REPLACEME
--->
-
-* `options` {Object}
-  * `prefix` {string} Mount point prefix for SEA assets. **Default:** `'/sea'`.
-  * `moduleHooks` {boolean} Whether to enable require/import hooks.
-    **Default:** `true`.
-* Returns: {VirtualFileSystem|null}
-
-Returns a VFS populated with all SEA embedded assets, mounted at the specified
-prefix. Returns `null` if not running as a SEA or if there are no assets.
-
-The VFS is a singleton - subsequent calls return the same instance (options
-are only used on the first call).
-
-```cjs
-const fs = require('node:fs');
-
-// In a SEA with an embedded 'config.json' asset:
-const seaVfs = fs.getSeaVfs();
-if (seaVfs) {
-  // Access embedded assets via standard fs APIs
-  const config = fs.readFileSync('/sea/config.json', 'utf8');
-  console.log(JSON.parse(config));
-
-  // Or require modules from embedded assets
-  const utils = require('/sea/utils.js');
-}
-```
-
-To use SEA assets, first configure them in your SEA configuration file:
-
-```json
-{
-  "main": "app.js",
-  "output": "app.blob",
-  "assets": {
-    "config.json": "path/to/config.json",
-    "utils.js": "path/to/utils.js"
-  }
-}
-```
-
-Then access them via the VFS:
-
-```cjs
-const fs = require('node:fs');
-const seaVfs = fs.getSeaVfs();
-
-// Assets are accessible at /sea/<asset-key>
-const config = fs.readFileSync('/sea/config.json', 'utf8');
-```
-
 ### Limitations
 
 The current VFS implementation has the following limitations:
 
 * **Read-only**: Files can only be set via `addFile()`. Write operations
   (`writeFile`, `appendFile`, etc.) are not supported.
-* **No symbolic links**: Symbolic links are not supported.
 * **No file watching**: `fs.watch()` and `fs.watchFile()` do not work with
   virtual files.
 * **No real file descriptor**: Virtual file descriptors (10000+) are managed
