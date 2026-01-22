@@ -2,11 +2,11 @@
 
 const common = require('../common');
 const assert = require('assert');
-const vfs = require('node:vfs');
+const fs = require('fs');
 
 // Test basic createReadStream
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/file.txt', 'hello world');
 
   const stream = myVfs.createReadStream('/file.txt');
@@ -31,7 +31,7 @@ const vfs = require('node:vfs');
 
 // Test createReadStream with encoding
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/encoded.txt', 'encoded content');
 
   const stream = myVfs.createReadStream('/encoded.txt', { encoding: 'utf8' });
@@ -49,7 +49,7 @@ const vfs = require('node:vfs');
 
 // Test createReadStream with start and end
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/range.txt', '0123456789');
 
   const stream = myVfs.createReadStream('/range.txt', {
@@ -70,7 +70,7 @@ const vfs = require('node:vfs');
 
 // Test createReadStream with start only
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/start.txt', 'abcdefghij');
 
   const stream = myVfs.createReadStream('/start.txt', { start: 5 });
@@ -87,7 +87,7 @@ const vfs = require('node:vfs');
 
 // Test createReadStream with non-existent file
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
 
   const stream = myVfs.createReadStream('/nonexistent.txt');
 
@@ -98,7 +98,7 @@ const vfs = require('node:vfs');
 
 // Test createReadStream path property
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/path-test.txt', 'test');
 
   const stream = myVfs.createReadStream('/path-test.txt');
@@ -110,7 +110,7 @@ const vfs = require('node:vfs');
 
 // Test createReadStream with small highWaterMark
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/small-hwm.txt', 'AAAABBBBCCCCDDDD');
 
   const stream = myVfs.createReadStream('/small-hwm.txt', {
@@ -131,7 +131,7 @@ const vfs = require('node:vfs');
 
 // Test createReadStream destroy
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/destroy.txt', 'content to destroy');
 
   const stream = myVfs.createReadStream('/destroy.txt');
@@ -145,7 +145,7 @@ const vfs = require('node:vfs');
 
 // Test createReadStream with large file
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   const largeContent = 'X'.repeat(100000);
   myVfs.addFile('/large.txt', largeContent);
 
@@ -163,7 +163,7 @@ const vfs = require('node:vfs');
 
 // Test createReadStream with dynamic content
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   let calls = 0;
   myVfs.addFile('/dynamic-stream.txt', () => {
     calls++;
@@ -185,7 +185,7 @@ const vfs = require('node:vfs');
 
 // Test createReadStream pipe to another stream
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   const { Writable } = require('stream');
 
   myVfs.addFile('/pipe-source.txt', 'pipe this content');
@@ -209,7 +209,7 @@ const vfs = require('node:vfs');
 
 // Test autoClose: false
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/no-auto-close.txt', 'content');
 
   const stream = myVfs.createReadStream('/no-auto-close.txt', {

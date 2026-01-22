@@ -2,14 +2,13 @@
 
 const common = require('../common');
 const assert = require('assert');
+const fs = require('fs');
 
-// Test that the vfs module can be loaded
-const vfs = require('node:vfs');
-
-// Test that VirtualFileSystem can be created
+// Test that VirtualFileSystem can be created via fs.createVirtual()
 {
-  const myVfs = vfs.create();
-  assert.ok(myVfs instanceof vfs.VirtualFileSystem);
+  const myVfs = fs.createVirtual();
+  assert.ok(myVfs);
+  assert.strictEqual(typeof myVfs.addFile, 'function');
   assert.strictEqual(myVfs.isMounted, false);
   assert.strictEqual(myVfs.isOverlay, false);
   assert.strictEqual(myVfs.fallthrough, true);
@@ -17,7 +16,7 @@ const vfs = require('node:vfs');
 
 // Test adding and reading a static file
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/test/file.txt', 'hello world');
 
   assert.strictEqual(myVfs.existsSync('/test/file.txt'), true);
@@ -35,7 +34,7 @@ const vfs = require('node:vfs');
 
 // Test statSync
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/test/file.txt', 'content');
   myVfs.addDirectory('/test/dir');
 
@@ -56,7 +55,7 @@ const vfs = require('node:vfs');
 
 // Test readdirSync
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/dir/a.txt', 'a');
   myVfs.addFile('/dir/b.txt', 'b');
   myVfs.addDirectory('/dir/subdir');
@@ -91,7 +90,7 @@ const vfs = require('node:vfs');
 
 // Test dynamic file content
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   let counter = 0;
   myVfs.addFile('/dynamic.txt', () => {
     counter++;
@@ -105,7 +104,7 @@ const vfs = require('node:vfs');
 
 // Test dynamic directory
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   let populated = false;
 
   myVfs.addDirectory('/dynamic', (dir) => {
@@ -133,7 +132,7 @@ const vfs = require('node:vfs');
 
 // Test removing entries
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/test/file.txt', 'content');
 
   assert.strictEqual(myVfs.has('/test/file.txt'), true);
@@ -146,7 +145,7 @@ const vfs = require('node:vfs');
 
 // Test mount mode
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/data/file.txt', 'mounted content');
 
   assert.strictEqual(myVfs.isMounted, false);
@@ -164,7 +163,7 @@ const vfs = require('node:vfs');
 
 // Test overlay mode
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/overlay/file.txt', 'overlay content');
 
   assert.strictEqual(myVfs.isOverlay, false);
@@ -181,7 +180,7 @@ const vfs = require('node:vfs');
 
 // Test internalModuleStat (used by Module._stat)
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/module.js', 'module.exports = {}');
   myVfs.addDirectory('/dir');
 
@@ -192,7 +191,7 @@ const vfs = require('node:vfs');
 
 // Test reading directory as file throws EISDIR
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addDirectory('/mydir');
 
   assert.throws(() => {
@@ -202,7 +201,7 @@ const vfs = require('node:vfs');
 
 // Test realpathSync
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/test/file.txt', 'content');
 
   const realpath = myVfs.realpathSync('/test/file.txt');

@@ -2,11 +2,11 @@
 
 const common = require('../common');
 const assert = require('assert');
-const vfs = require('node:vfs');
+const fs = require('fs');
 
 // Test openSync and closeSync
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/file.txt', 'hello world');
 
   const fd = myVfs.openSync('/file.txt');
@@ -16,7 +16,7 @@ const vfs = require('node:vfs');
 
 // Test openSync with non-existent file
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
 
   assert.throws(() => {
     myVfs.openSync('/nonexistent.txt');
@@ -25,7 +25,7 @@ const vfs = require('node:vfs');
 
 // Test openSync with directory
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addDirectory('/mydir');
 
   assert.throws(() => {
@@ -35,7 +35,7 @@ const vfs = require('node:vfs');
 
 // Test closeSync with invalid fd
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
 
   assert.throws(() => {
     myVfs.closeSync(12345);
@@ -44,7 +44,7 @@ const vfs = require('node:vfs');
 
 // Test readSync
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/file.txt', 'hello world');
 
   const fd = myVfs.openSync('/file.txt');
@@ -59,7 +59,7 @@ const vfs = require('node:vfs');
 
 // Test readSync with position tracking
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/file.txt', 'hello world');
 
   const fd = myVfs.openSync('/file.txt');
@@ -81,7 +81,7 @@ const vfs = require('node:vfs');
 
 // Test readSync with explicit position
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/file.txt', 'hello world');
 
   const fd = myVfs.openSync('/file.txt');
@@ -97,7 +97,7 @@ const vfs = require('node:vfs');
 
 // Test readSync at end of file
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/file.txt', 'short');
 
   const fd = myVfs.openSync('/file.txt');
@@ -112,7 +112,7 @@ const vfs = require('node:vfs');
 
 // Test readSync with invalid fd
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   const buffer = Buffer.alloc(10);
 
   assert.throws(() => {
@@ -122,7 +122,7 @@ const vfs = require('node:vfs');
 
 // Test fstatSync
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/file.txt', 'hello world');
 
   const fd = myVfs.openSync('/file.txt');
@@ -137,7 +137,7 @@ const vfs = require('node:vfs');
 
 // Test fstatSync with invalid fd
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
 
   assert.throws(() => {
     myVfs.fstatSync(99999);
@@ -146,7 +146,7 @@ const vfs = require('node:vfs');
 
 // Test async open and close
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/async-file.txt', 'async content');
 
   myVfs.open('/async-file.txt', common.mustCall((err, fd) => {
@@ -161,7 +161,7 @@ const vfs = require('node:vfs');
 
 // Test async open with error
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
 
   myVfs.open('/nonexistent.txt', common.mustCall((err, fd) => {
     assert.strictEqual(err.code, 'ENOENT');
@@ -171,7 +171,7 @@ const vfs = require('node:vfs');
 
 // Test async close with invalid fd
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
 
   myVfs.close(99999, common.mustCall((err) => {
     assert.strictEqual(err.code, 'EBADF');
@@ -180,7 +180,7 @@ const vfs = require('node:vfs');
 
 // Test async read
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/read-test.txt', 'read content');
 
   myVfs.open('/read-test.txt', common.mustCall((err, fd) => {
@@ -200,7 +200,7 @@ const vfs = require('node:vfs');
 
 // Test async read with position tracking
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/track-test.txt', 'ABCDEFGHIJ');
 
   myVfs.open('/track-test.txt', common.mustCall((err, fd) => {
@@ -228,7 +228,7 @@ const vfs = require('node:vfs');
 
 // Test async read with invalid fd
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   const buffer = Buffer.alloc(10);
 
   myVfs.read(99999, buffer, 0, 10, 0, common.mustCall((err, bytesRead, buf) => {
@@ -238,7 +238,7 @@ const vfs = require('node:vfs');
 
 // Test async fstat
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/fstat-test.txt', '12345');
 
   myVfs.open('/fstat-test.txt', common.mustCall((err, fd) => {
@@ -256,7 +256,7 @@ const vfs = require('node:vfs');
 
 // Test async fstat with invalid fd
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
 
   myVfs.fstat(99999, common.mustCall((err, stats) => {
     assert.strictEqual(err.code, 'EBADF');
@@ -265,8 +265,8 @@ const vfs = require('node:vfs');
 
 // Test that separate VFS instances have separate fd spaces
 {
-  const vfs1 = vfs.create();
-  const vfs2 = vfs.create();
+  const vfs1 = fs.createVirtual();
+  const vfs2 = fs.createVirtual();
 
   vfs1.addFile('/file1.txt', 'content1');
   vfs2.addFile('/file2.txt', 'content2');
@@ -296,7 +296,7 @@ const vfs = require('node:vfs');
 
 // Test multiple opens of same file
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/multi.txt', 'multi content');
 
   const fd1 = myVfs.openSync('/multi.txt');

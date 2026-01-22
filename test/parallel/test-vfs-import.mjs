@@ -1,14 +1,14 @@
 import '../common/index.mjs';
 import assert from 'assert';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
-import vfs from 'node:vfs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Test importing a simple virtual ES module
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/hello.mjs', 'export const message = "hello from vfs";');
   myVfs.mount('/virtual');
 
@@ -20,7 +20,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Test importing a virtual module with default export
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/default.mjs', 'export default { name: "test", value: 42 };');
   myVfs.mount('/virtual2');
 
@@ -33,7 +33,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Test importing a virtual module that imports another virtual module
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/utils.mjs', 'export function add(a, b) { return a + b; }');
   myVfs.addFile('/main.mjs', `
     import { add } from '/virtual3/utils.mjs';
@@ -49,7 +49,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Test importing with relative paths
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/lib/helper.mjs', 'export const helper = () => "helped";');
   myVfs.addFile('/lib/index.mjs', `
     import { helper } from './helper.mjs';
@@ -65,7 +65,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Test importing JSON from VFS (with import assertion)
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/data.json', JSON.stringify({ items: [1, 2, 3], enabled: true }));
   myVfs.mount('/virtual5');
 
@@ -78,7 +78,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Test overlay mode with import
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   const testPath = path.join(__dirname, '../fixtures/vfs-test/overlay-module.mjs');
 
   // Create a virtual module at a path that doesn't exist on disk
@@ -93,7 +93,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Test that real modules still work when VFS is mounted
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/test.mjs', 'export const x = 1;');
   myVfs.mount('/virtual6');
 
@@ -106,7 +106,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Test dynamic content for ESM modules
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   let counter = 0;
 
   myVfs.addFile('/dynamic.mjs', () => {
@@ -129,7 +129,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Test mixed CJS and ESM - ESM importing from VFS while CJS also works
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/esm-module.mjs', 'export const esmValue = "esm";');
   myVfs.addFile('/cjs-module.js', 'module.exports = { cjsValue: "cjs" };');
   myVfs.mount('/virtual8');

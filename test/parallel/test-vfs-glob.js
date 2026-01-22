@@ -3,11 +3,10 @@
 const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
-const vfs = require('node:vfs');
 
 // Test globSync with VFS mounted directory
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/src/index.js', 'export default 1;');
   myVfs.addFile('/src/utils.js', 'export const util = 1;');
   myVfs.addFile('/src/lib/helper.js', 'export const helper = 1;');
@@ -40,7 +39,7 @@ const vfs = require('node:vfs');
 
 // Test glob with overlay mode
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/overlay-glob/a.txt', 'a');
   myVfs.addFile('/overlay-glob/b.txt', 'b');
   myVfs.addFile('/overlay-glob/c.md', 'c');
@@ -63,7 +62,7 @@ const vfs = require('node:vfs');
 
 // Test glob with withFileTypes option
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/typed/file.txt', 'text');
   myVfs.addDirectory('/typed/subdir');
   myVfs.addFile('/typed/subdir/nested.txt', 'nested');
@@ -87,7 +86,7 @@ const vfs = require('node:vfs');
 
 // Test glob with multiple patterns
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/multi/a.js', 'a');
   myVfs.addFile('/multi/b.ts', 'b');
   myVfs.addFile('/multi/c.md', 'c');
@@ -103,7 +102,7 @@ const vfs = require('node:vfs');
 
 // Test that unmounting stops glob from finding VFS files
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/unmount-test/file.js', 'content');
   myVfs.mount('/unmount-glob');
 
@@ -118,7 +117,7 @@ const vfs = require('node:vfs');
 
 // Test glob pattern that doesn't match anything
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/nomatch/file.txt', 'content');
   myVfs.mount('/nomatchvfs');
 
@@ -130,7 +129,7 @@ const vfs = require('node:vfs');
 
 // Test cwd option with VFS (relative patterns)
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/cwd-test/a.js', 'a');
   myVfs.addFile('/cwd-test/b.js', 'b');
   myVfs.mount('/cwdvfs');

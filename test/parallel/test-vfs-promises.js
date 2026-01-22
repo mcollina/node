@@ -2,11 +2,11 @@
 
 const common = require('../common');
 const assert = require('assert');
-const vfs = require('node:vfs');
+const fs = require('fs');
 
 // Test callback-based readFile
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/test.txt', 'hello world');
 
   myVfs.readFile('/test.txt', common.mustCall((err, data) => {
@@ -28,7 +28,7 @@ const vfs = require('node:vfs');
 
 // Test callback-based readFile with non-existent file
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
 
   myVfs.readFile('/nonexistent.txt', common.mustCall((err, data) => {
     assert.strictEqual(err.code, 'ENOENT');
@@ -38,7 +38,7 @@ const vfs = require('node:vfs');
 
 // Test callback-based readFile with directory
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addDirectory('/mydir');
 
   myVfs.readFile('/mydir', common.mustCall((err, data) => {
@@ -49,7 +49,7 @@ const vfs = require('node:vfs');
 
 // Test callback-based stat
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/file.txt', 'content');
   myVfs.addDirectory('/dir');
 
@@ -74,7 +74,7 @@ const vfs = require('node:vfs');
 
 // Test callback-based lstat (same as stat for VFS)
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/file.txt', 'content');
 
   myVfs.lstat('/file.txt', common.mustCall((err, stats) => {
@@ -85,7 +85,7 @@ const vfs = require('node:vfs');
 
 // Test callback-based readdir
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/dir/file1.txt', 'a');
   myVfs.addFile('/dir/file2.txt', 'b');
   myVfs.addDirectory('/dir/subdir');
@@ -121,7 +121,7 @@ const vfs = require('node:vfs');
 
 // Test callback-based realpath
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/path/to/file.txt', 'content');
 
   myVfs.realpath('/path/to/file.txt', common.mustCall((err, resolved) => {
@@ -142,7 +142,7 @@ const vfs = require('node:vfs');
 
 // Test callback-based access
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/accessible.txt', 'content');
 
   myVfs.access('/accessible.txt', common.mustCall((err) => {
@@ -156,7 +156,7 @@ const vfs = require('node:vfs');
 
 // Test async dynamic content with callback API
 {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/async-dynamic.txt', async () => {
     return 'async content';
   });
@@ -171,7 +171,7 @@ const vfs = require('node:vfs');
 
 // Test promises.readFile
 (async () => {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/promise-test.txt', 'promise content');
 
   const bufferData = await myVfs.promises.readFile('/promise-test.txt');
@@ -198,7 +198,7 @@ const vfs = require('node:vfs');
 
 // Test promises.stat
 (async () => {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/stat-file.txt', 'hello');
   myVfs.addDirectory('/stat-dir');
 
@@ -217,7 +217,7 @@ const vfs = require('node:vfs');
 
 // Test promises.lstat
 (async () => {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/lstat-file.txt', 'content');
 
   const stats = await myVfs.promises.lstat('/lstat-file.txt');
@@ -226,7 +226,7 @@ const vfs = require('node:vfs');
 
 // Test promises.readdir
 (async () => {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/pdir/a.txt', 'a');
   myVfs.addFile('/pdir/b.txt', 'b');
   myVfs.addDirectory('/pdir/sub');
@@ -252,7 +252,7 @@ const vfs = require('node:vfs');
 
 // Test promises.realpath
 (async () => {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/real/path/file.txt', 'content');
 
   const resolved = await myVfs.promises.realpath('/real/path/file.txt');
@@ -269,7 +269,7 @@ const vfs = require('node:vfs');
 
 // Test promises.access
 (async () => {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   myVfs.addFile('/access-test.txt', 'content');
 
   await myVfs.promises.access('/access-test.txt');
@@ -282,7 +282,7 @@ const vfs = require('node:vfs');
 
 // Test async dynamic content with promise API
 (async () => {
-  const myVfs = vfs.create();
+  const myVfs = fs.createVirtual();
   let counter = 0;
 
   myVfs.addFile('/async-counter.txt', async () => {
