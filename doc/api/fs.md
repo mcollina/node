@@ -8306,12 +8306,34 @@ Use `fs.createVirtual()` to create a new VFS instance:
 const fs = require('node:fs');
 
 const vfs = fs.createVirtual();
+
+// Add files to the VFS
+vfs.addFile('/config.json', JSON.stringify({ debug: true }));
+vfs.addFile('/data.txt', 'Hello, World!');
+
+// Mount the VFS at a specific path
+vfs.mount('/app');
+
+// Now files are accessible via standard fs APIs
+const config = JSON.parse(fs.readFileSync('/app/config.json', 'utf8'));
+console.log(config.debug); // true
 ```
 
 ```mjs
 import fs from 'node:fs';
 
 const vfs = fs.createVirtual();
+
+// Add files to the VFS
+vfs.addFile('/config.json', JSON.stringify({ debug: true }));
+vfs.addFile('/data.txt', 'Hello, World!');
+
+// Mount the VFS at a specific path
+vfs.mount('/app');
+
+// Now files are accessible via standard fs APIs
+const config = JSON.parse(fs.readFileSync('/app/config.json', 'utf8'));
+console.log(config.debug); // true
 ```
 
 ### `fs.createVirtual([options])`
