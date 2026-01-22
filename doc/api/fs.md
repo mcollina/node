@@ -8347,6 +8347,8 @@ added: REPLACEME
     fall through to the real file system. **Default:** `true`.
   * `moduleHooks` {boolean} When `true`, enables hooks for `require()` and
     `import` to load modules from the VFS. **Default:** `true`.
+  * `virtualCwd` {boolean} When `true`, enables virtual working directory
+    support via `vfs.chdir()` and `vfs.cwd()`. **Default:** `false`.
 * Returns: {VirtualFileSystem}
 
 Creates a new virtual file system instance.
@@ -8530,6 +8532,147 @@ added: REPLACEME
 * Returns: {boolean} `true` if the entry was removed, `false` if not found.
 
 Removes a file or directory from the VFS.
+
+#### `vfs.virtualCwdEnabled`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* {boolean}
+
+Returns `true` if virtual working directory support is enabled for this VFS
+instance. This is determined by the `virtualCwd` option passed to
+`fs.createVirtual()`.
+
+#### `vfs.cwd()`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* Returns: {string|null} The current virtual working directory, or `null` if
+  not set.
+
+Gets the virtual current working directory. Throws `ERR_INVALID_STATE` if
+`virtualCwd` option was not enabled when creating the VFS.
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual({ virtualCwd: true });
+vfs.addDirectory('/project');
+vfs.mount('/app');
+
+console.log(vfs.cwd()); // null (not set yet)
+
+vfs.chdir('/app/project');
+console.log(vfs.cwd()); // '/app/project'
+```
+
+#### `vfs.chdir(path)`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* `path` {string} The directory path to set as the current working directory.
+
+Sets the virtual current working directory. The path must exist in the VFS and
+must be a directory. Throws `ENOENT` if the path does not exist, `ENOTDIR` if
+the path is not a directory, or `ERR_INVALID_STATE` if `virtualCwd` option was
+not enabled.
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual({ virtualCwd: true });
+vfs.addDirectory('/project');
+vfs.addDirectory('/project/src');
+vfs.addFile('/project/src/index.js', 'module.exports = "hello";');
+vfs.mount('/app');
+
+vfs.chdir('/app/project');
+console.log(vfs.cwd()); // '/app/project'
+
+vfs.chdir('/app/project/src');
+console.log(vfs.cwd()); // '/app/project/src'
+```
+
+##### `process.chdir()` and `process.cwd()` interception
+
+When `virtualCwd` is enabled and the VFS is mounted or in overlay mode,
+`process.chdir()` and `process.cwd()` are intercepted to support transparent
+virtual working directory operations:
+
+* `process.chdir(path)` - When called with a path that resolves to the VFS,
+  the virtual cwd is updated instead of changing the real process working
+  directory. Paths outside the VFS fall through to the real `process.chdir()`.
+
+* `process.cwd()` - When a virtual cwd is set, returns the virtual cwd.
+  Otherwise, returns the real process working directory.
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual({ virtualCwd: true });
+vfs.addDirectory('/project');
+vfs.mount('/virtual');
+
+const originalCwd = process.cwd();
+
+// Change to a VFS directory using process.chdir
+process.chdir('/virtual/project');
+console.log(process.cwd()); // '/virtual/project'
+console.log(vfs.cwd()); // '/virtual/project'
+
+// Change to a real directory (falls through)
+process.chdir('/tmp');
+console.log(process.cwd()); // '/tmp' (real cwd)
+
+// Restore and unmount
+process.chdir(originalCwd);
+vfs.unmount();
+```
+
+When the VFS is unmounted, `process.chdir()` and `process.cwd()` are restored
+to their original implementations.
+
+> **Note:** VFS hooks are not automatically shared with worker threads. Each
+> worker thread has its own `process` object and must set up its own VFS
+> instance if virtual cwd support is needed.
+
+#### `vfs.resolvePath(path)`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* `path` {string} The path to resolve.
+* Returns: {string} The resolved absolute path.
+
+Resolves a path relative to the virtual current working directory. If the path
+is absolute, it is returned as-is (normalized). If `virtualCwd` is enabled and
+a virtual cwd is set, relative paths are resolved against it. Otherwise,
+relative paths are resolved using the real process working directory.
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual({ virtualCwd: true });
+vfs.addDirectory('/project');
+vfs.addDirectory('/project/src');
+vfs.mount('/app');
+
+vfs.chdir('/app/project');
+
+// Absolute paths returned as-is
+console.log(vfs.resolvePath('/other/path')); // '/other/path'
+
+// Relative paths resolved against virtual cwd
+console.log(vfs.resolvePath('src/index.js')); // '/app/project/src/index.js'
+console.log(vfs.resolvePath('./src/index.js')); // '/app/project/src/index.js'
+```
 
 ### VFS file system operations
 
