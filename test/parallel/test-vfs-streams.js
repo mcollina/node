@@ -233,4 +233,3 @@ const fs = require('fs');
   }));
 }
 
-console.log('All VFS streams tests passed');

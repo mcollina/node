@@ -298,4 +298,3 @@ const fs = require('fs');
   assert.strictEqual(data2, 'count: 2');
 })().then(common.mustCall());
 
-console.log('All VFS promises tests passed');

@@ -8323,6 +8323,8 @@ added: REPLACEME
 * `options` {Object}
   * `fallthrough` {boolean} When `true`, operations on paths not in the VFS
     fall through to the real file system. **Default:** `true`.
+  * `moduleHooks` {boolean} When `true`, enables hooks for `require()` and
+    `import` to load modules from the VFS. **Default:** `true`.
 * Returns: {VirtualFileSystem}
 
 Creates a new virtual file system instance.
@@ -8335,6 +8337,9 @@ const vfs = fs.createVirtual({ fallthrough: true });
 
 // Create a VFS that only serves virtual files
 const isolatedVfs = fs.createVirtual({ fallthrough: false });
+
+// Create a VFS without module loading hooks (fs operations only)
+const fsOnlyVfs = fs.createVirtual({ moduleHooks: false });
 ```
 
 ### Class: `VirtualFileSystem`
@@ -8661,7 +8666,8 @@ console.log(mod.default()); // 'Hello'
 
 ### Glob support
 
-The VFS integrates with `fs.globSync()` when mounted or in overlay mode:
+The VFS integrates with `fs.glob()`, `fs.globSync()`, and `fs/promises.glob()`
+when mounted or in overlay mode:
 
 ```cjs
 const fs = require('node:fs');
@@ -8672,10 +8678,21 @@ vfs.addFile('/src/utils.js', 'export const util = 1;');
 vfs.addFile('/src/lib/helper.js', 'export const helper = 1;');
 vfs.mount('/virtual');
 
-// Glob patterns work with virtual files
+// Sync glob
 const files = fs.globSync('/virtual/src/**/*.js');
 console.log(files);
 // ['/virtual/src/index.js', '/virtual/src/utils.js', '/virtual/src/lib/helper.js']
+
+// Async glob with callback
+fs.glob('/virtual/src/*.js', (err, matches) => {
+  console.log(matches); // ['/virtual/src/index.js', '/virtual/src/utils.js']
+});
+
+// Async glob with promises (returns async iterator)
+const { glob } = require('fs/promises');
+for await (const file of glob('/virtual/src/**/*.js')) {
+  console.log(file);
+}
 ```
 
 ### Limitations
@@ -8687,8 +8704,6 @@ The current VFS implementation has the following limitations:
 * **No symbolic links**: Symbolic links are not supported.
 * **No file watching**: `fs.watch()` and `fs.watchFile()` do not work with
   virtual files.
-* **Async glob**: Only `fs.globSync()` is supported. The async `fs.glob()` API
-  does not support VFS paths.
 * **No real file descriptor**: Virtual file descriptors (10000+) are managed
   separately from real file descriptors.
 

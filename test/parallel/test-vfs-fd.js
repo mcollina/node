@@ -317,4 +317,3 @@ const fs = require('fs');
   myVfs.closeSync(fd2);
 }
 
-console.log('All VFS fd tests passed');

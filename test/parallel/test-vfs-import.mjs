@@ -146,4 +146,3 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
   myVfs.unmount();
 }
 
-console.log('All VFS import tests passed');

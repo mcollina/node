@@ -204,4 +204,3 @@ const fs = require('fs');
   }, { code: 'MODULE_NOT_FOUND' });
 }
 
-console.log('All VFS require tests passed');

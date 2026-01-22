@@ -57,8 +57,61 @@ const fs = require('fs');
   myVfs.unmount();
 }
 
-// Note: Async glob (fs.glob with callback) requires hooking fs/promises
-// which is not implemented yet. The globSync version works with VFS.
+// Test async glob (callback API) with VFS mounted directory
+{
+  const myVfs = fs.createVirtual();
+  myVfs.addFile('/async-src/index.js', 'export default 1;');
+  myVfs.addFile('/async-src/utils.js', 'export const util = 1;');
+  myVfs.addFile('/async-src/lib/helper.js', 'export const helper = 1;');
+  myVfs.mount('/async-virtual');
+
+  fs.glob('/async-virtual/async-src/*.js', common.mustCall((err, files) => {
+    assert.strictEqual(err, null);
+    assert.strictEqual(files.length, 2);
+    assert.ok(files.includes('/async-virtual/async-src/index.js'));
+    assert.ok(files.includes('/async-virtual/async-src/utils.js'));
+
+    // Test recursive pattern with callback
+    fs.glob('/async-virtual/async-src/**/*.js', common.mustCall((err, allFiles) => {
+      assert.strictEqual(err, null);
+      assert.strictEqual(allFiles.length, 3);
+      assert.ok(allFiles.includes('/async-virtual/async-src/index.js'));
+      assert.ok(allFiles.includes('/async-virtual/async-src/utils.js'));
+      assert.ok(allFiles.includes('/async-virtual/async-src/lib/helper.js'));
+
+      myVfs.unmount();
+    }));
+  }));
+}
+
+// Test async glob (promise API) with VFS
+(async () => {
+  const myVfs = fs.createVirtual();
+  myVfs.addFile('/promise-src/a.ts', 'const a = 1;');
+  myVfs.addFile('/promise-src/b.ts', 'const b = 2;');
+  myVfs.addFile('/promise-src/c.js', 'const c = 3;');
+  myVfs.mount('/promise-virtual');
+
+  const { glob } = require('fs/promises');
+
+  // glob returns an async iterator, need to collect results
+  const tsFiles = [];
+  for await (const file of glob('/promise-virtual/promise-src/*.ts')) {
+    tsFiles.push(file);
+  }
+  assert.strictEqual(tsFiles.length, 2);
+  assert.ok(tsFiles.includes('/promise-virtual/promise-src/a.ts'));
+  assert.ok(tsFiles.includes('/promise-virtual/promise-src/b.ts'));
+
+  // Test multiple patterns
+  const allFiles = [];
+  for await (const file of glob(['/promise-virtual/promise-src/*.ts', '/promise-virtual/promise-src/*.js'])) {
+    allFiles.push(file);
+  }
+  assert.strictEqual(allFiles.length, 3);
+
+  myVfs.unmount();
+})().then(common.mustCall());
 
 // Test glob with withFileTypes option
 {
@@ -142,4 +195,3 @@ const fs = require('fs');
   myVfs.unmount();
 }
 
-console.log('All VFS glob tests passed');

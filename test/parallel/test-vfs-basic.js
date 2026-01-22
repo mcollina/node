@@ -213,4 +213,3 @@ const fs = require('fs');
   }, { code: 'ENOENT' });
 }
 
-console.log('All VFS basic tests passed');
