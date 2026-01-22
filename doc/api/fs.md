@@ -8285,6 +8285,413 @@ The following constants are meant for use with the {fs.Stats} object's
 
 On Windows, only `S_IRUSR` and `S_IWUSR` are available.
 
+## Virtual file system
+
+<!-- YAML
+added: REPLACEME
+-->
+
+> Stability: 1 - Experimental
+
+The virtual file system (VFS) allows creating in-memory file system overlays
+that integrate seamlessly with Node.js's `fs` module and module loader. Virtual
+files and directories can be accessed using standard `fs` operations and can be
+`require()`d or `import`ed like regular files.
+
+### Creating a virtual file system
+
+Use `fs.createVirtual()` to create a new VFS instance:
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+```
+
+```mjs
+import fs from 'node:fs';
+
+const vfs = fs.createVirtual();
+```
+
+### `fs.createVirtual([options])`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* `options` {Object}
+  * `fallthrough` {boolean} When `true`, operations on paths not in the VFS
+    fall through to the real file system. **Default:** `true`.
+* Returns: {VirtualFileSystem}
+
+Creates a new virtual file system instance.
+
+```cjs
+const fs = require('node:fs');
+
+// Create a VFS that falls through to real fs for unmatched paths
+const vfs = fs.createVirtual({ fallthrough: true });
+
+// Create a VFS that only serves virtual files
+const isolatedVfs = fs.createVirtual({ fallthrough: false });
+```
+
+### Class: `VirtualFileSystem`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+A `VirtualFileSystem` instance manages virtual files and directories and
+provides methods to mount them into the file system namespace.
+
+#### `vfs.addFile(path, content)`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* `path` {string} The virtual path for the file.
+* `content` {string|Buffer|Function} The file content, or a function that
+  returns the content.
+
+Adds a virtual file. The `content` can be:
+* A `string` or `Buffer` for static content
+* A synchronous function `() => string|Buffer` for dynamic content
+* An async function `async () => string|Buffer` for async dynamic content
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+
+// Static content
+vfs.addFile('/config.json', '{"debug": true}');
+
+// Dynamic content (evaluated on each read)
+vfs.addFile('/timestamp.txt', () => Date.now().toString());
+
+// Async dynamic content
+vfs.addFile('/data.json', async () => {
+  const data = await fetchData();
+  return JSON.stringify(data);
+});
+```
+
+#### `vfs.addDirectory(path[, populate])`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* `path` {string} The virtual path for the directory.
+* `populate` {Function} Optional callback to dynamically populate the directory.
+
+Adds a virtual directory. If `populate` is provided, it receives a scoped VFS
+for adding files and subdirectories within this directory. The callback is
+invoked lazily on first access.
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+
+// Empty directory
+vfs.addDirectory('/empty');
+
+// Directory with static contents
+vfs.addDirectory('/lib');
+vfs.addFile('/lib/utils.js', 'module.exports = {}');
+
+// Dynamic directory (populated on first access)
+vfs.addDirectory('/plugins', (dir) => {
+  dir.addFile('a.js', 'module.exports = "plugin a"');
+  dir.addFile('b.js', 'module.exports = "plugin b"');
+});
+```
+
+#### `vfs.mount(prefix)`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* `prefix` {string} The path prefix where the VFS will be mounted.
+
+Mounts the VFS at a specific path prefix. All paths in the VFS become accessible
+under this prefix. Only one mount point can be active at a time.
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+vfs.addFile('/module.js', 'module.exports = "hello"');
+vfs.mount('/virtual');
+
+// Now accessible at /virtual/module.js
+const content = fs.readFileSync('/virtual/module.js', 'utf8');
+const mod = require('/virtual/module.js');
+```
+
+#### `vfs.overlay()`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+Enables overlay mode, where the VFS is checked first for all file system
+operations. If a path exists in the VFS, it is used; otherwise, the operation
+falls through to the real file system (if `fallthrough` is enabled).
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+vfs.addFile('/etc/myapp/config.json', '{"virtual": true}');
+vfs.overlay();
+
+// Virtual file is returned
+fs.readFileSync('/etc/myapp/config.json', 'utf8'); // '{"virtual": true}'
+
+// Real file system used for non-virtual paths
+fs.readFileSync('/etc/hosts', 'utf8'); // Real file contents
+```
+
+#### `vfs.unmount()`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+Unmounts the VFS, removing it from the file system namespace. After unmounting,
+the virtual files are no longer accessible through standard `fs` operations.
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+vfs.addFile('/test.txt', 'content');
+vfs.mount('/vfs');
+
+fs.existsSync('/vfs/test.txt'); // true
+
+vfs.unmount();
+
+fs.existsSync('/vfs/test.txt'); // false
+```
+
+#### `vfs.has(path)`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* `path` {string} The path to check.
+* Returns: {boolean}
+
+Returns `true` if the VFS contains a file or directory at the given path.
+
+#### `vfs.remove(path)`
+
+<!-- YAML
+added: REPLACEME
+-->
+
+* `path` {string} The path to remove.
+* Returns: {boolean} `true` if the entry was removed, `false` if not found.
+
+Removes a file or directory from the VFS.
+
+### VFS file system operations
+
+The `VirtualFileSystem` instance provides direct access to file system
+operations that bypass the real file system entirely. These methods have the
+same signatures as their `fs` module counterparts.
+
+#### Synchronous methods
+
+* `vfs.readFileSync(path[, options])` - Read file contents
+* `vfs.statSync(path[, options])` - Get file stats
+* `vfs.lstatSync(path[, options])` - Get file stats (same as statSync for VFS)
+* `vfs.readdirSync(path[, options])` - List directory contents
+* `vfs.existsSync(path)` - Check if path exists
+* `vfs.realpathSync(path[, options])` - Resolve path (normalizes `.` and `..`)
+* `vfs.accessSync(path[, mode])` - Check file accessibility
+* `vfs.openSync(path[, flags[, mode]])` - Open file and return file descriptor
+* `vfs.closeSync(fd)` - Close file descriptor
+* `vfs.readSync(fd, buffer, offset, length, position)` - Read from file descriptor
+* `vfs.fstatSync(fd[, options])` - Get stats from file descriptor
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+vfs.addFile('/data.txt', 'Hello, World!');
+
+// Direct VFS operations (no mounting required)
+const content = vfs.readFileSync('/data.txt', 'utf8');
+const stats = vfs.statSync('/data.txt');
+console.log(content); // 'Hello, World!'
+console.log(stats.size); // 13
+```
+
+#### Callback methods
+
+* `vfs.readFile(path[, options], callback)` - Read file contents
+* `vfs.stat(path[, options], callback)` - Get file stats
+* `vfs.lstat(path[, options], callback)` - Get file stats
+* `vfs.readdir(path[, options], callback)` - List directory contents
+* `vfs.realpath(path[, options], callback)` - Resolve path
+* `vfs.access(path[, mode], callback)` - Check file accessibility
+* `vfs.open(path[, flags[, mode]], callback)` - Open file
+* `vfs.close(fd, callback)` - Close file descriptor
+* `vfs.read(fd, buffer, offset, length, position, callback)` - Read from fd
+* `vfs.fstat(fd[, options], callback)` - Get stats from file descriptor
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+vfs.addFile('/async.txt', 'Async content');
+
+vfs.readFile('/async.txt', 'utf8', (err, data) => {
+  if (err) throw err;
+  console.log(data); // 'Async content'
+});
+```
+
+#### Promise methods
+
+The `vfs.promises` object provides promise-based versions of the file system
+methods:
+
+* `vfs.promises.readFile(path[, options])` - Read file contents
+* `vfs.promises.stat(path[, options])` - Get file stats
+* `vfs.promises.lstat(path[, options])` - Get file stats
+* `vfs.promises.readdir(path[, options])` - List directory contents
+* `vfs.promises.realpath(path[, options])` - Resolve path
+* `vfs.promises.access(path[, mode])` - Check file accessibility
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+vfs.addFile('/promise.txt', 'Promise content');
+
+(async () => {
+  const data = await vfs.promises.readFile('/promise.txt', 'utf8');
+  console.log(data); // 'Promise content'
+})();
+```
+
+#### Streams
+
+* `vfs.createReadStream(path[, options])` - Create a readable stream
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+vfs.addFile('/stream.txt', 'Streaming content');
+
+const stream = vfs.createReadStream('/stream.txt', { encoding: 'utf8' });
+stream.on('data', (chunk) => console.log(chunk));
+stream.on('end', () => console.log('Done'));
+```
+
+The readable stream supports the following options:
+* `encoding` {string} Character encoding for string output.
+* `start` {integer} Byte position to start reading from.
+* `end` {integer} Byte position to stop reading at (inclusive).
+* `highWaterMark` {integer} Maximum number of bytes to buffer.
+* `autoClose` {boolean} Automatically close the stream on end. **Default:** `true`.
+
+### Module loading from VFS
+
+Virtual files can be loaded as modules using `require()` or `import`. The VFS
+integrates with Node.js's module loaders automatically when mounted or in
+overlay mode.
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+
+// Add a CommonJS module
+vfs.addFile('/app/math.js', `
+  module.exports = {
+    add: (a, b) => a + b,
+    multiply: (a, b) => a * b
+  };
+`);
+
+// Add a package.json
+vfs.addFile('/app/package.json', '{"name": "virtual-app", "main": "math.js"}');
+
+vfs.mount('/app');
+
+// Require the virtual module
+const math = require('/app/math.js');
+console.log(math.add(2, 3)); // 5
+
+// Require the package
+const pkg = require('/app');
+console.log(pkg.multiply(4, 5)); // 20
+```
+
+```mjs
+import fs from 'node:fs';
+
+const vfs = fs.createVirtual();
+
+// Add an ES module
+vfs.addFile('/esm/module.mjs', `
+  export const value = 42;
+  export default function greet() { return 'Hello'; }
+`);
+
+vfs.mount('/esm');
+
+// Dynamic import of virtual ES module
+const mod = await import('/esm/module.mjs');
+console.log(mod.value); // 42
+console.log(mod.default()); // 'Hello'
+```
+
+### Glob support
+
+The VFS integrates with `fs.globSync()` when mounted or in overlay mode:
+
+```cjs
+const fs = require('node:fs');
+
+const vfs = fs.createVirtual();
+vfs.addFile('/src/index.js', 'export default 1;');
+vfs.addFile('/src/utils.js', 'export const util = 1;');
+vfs.addFile('/src/lib/helper.js', 'export const helper = 1;');
+vfs.mount('/virtual');
+
+// Glob patterns work with virtual files
+const files = fs.globSync('/virtual/src/**/*.js');
+console.log(files);
+// ['/virtual/src/index.js', '/virtual/src/utils.js', '/virtual/src/lib/helper.js']
+```
+
+### Limitations
+
+The current VFS implementation has the following limitations:
+
+* **Read-only**: Files can only be set via `addFile()`. Write operations
+  (`writeFile`, `appendFile`, etc.) are not supported.
+* **No symbolic links**: Symbolic links are not supported.
+* **No file watching**: `fs.watch()` and `fs.watchFile()` do not work with
+  virtual files.
+* **Async glob**: Only `fs.globSync()` is supported. The async `fs.glob()` API
+  does not support VFS paths.
+* **No real file descriptor**: Virtual file descriptors (10000+) are managed
+  separately from real file descriptors.
+
 ## Notes
 
 ### Ordering of callback and promise-based operations
