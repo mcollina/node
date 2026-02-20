@@ -1082,11 +1082,26 @@ napi_create_external_buffer(napi_env env,
   NAPI_PREAMBLE(env);
   CHECK_ARG(env, result);
 
-#ifdef V8_ENABLE_SANDBOX
-  return napi_set_last_error(env, napi_no_external_buffers_allowed);
-#else
   v8::Isolate* isolate = env->isolate;
 
+#ifdef V8_ENABLE_SANDBOX
+  // When the V8 sandbox is enabled, external backing stores are not supported
+  // because all ArrayBuffer allocations must live inside the sandbox address
+  // space. Fall back to copying the data into a V8-managed backing store and
+  // invoke the caller's release callback on the original data.
+  v8::MaybeLocal<v8::Object> maybe =
+      node::Buffer::Copy(isolate, static_cast<const char*>(data), length);
+
+  CHECK_MAYBE_EMPTY(env, maybe, napi_generic_failure);
+
+  // Release the original external data via the caller's callback.
+  if (finalize_cb != nullptr) {
+    finalize_cb(env, data, finalize_hint);
+  }
+
+  *result = v8impl::JsValueFromV8LocalValue(maybe.ToLocalChecked());
+  return GET_RETURN_STATUS(env);
+#else
   // The finalizer object will delete itself after invoking the callback.
   v8impl::BufferFinalizer* finalizer =
       v8impl::BufferFinalizer::New(env, finalize_cb, data, finalize_hint);

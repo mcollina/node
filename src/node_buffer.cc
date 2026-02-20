@@ -529,19 +529,17 @@ MaybeLocal<Object> New(Environment* env,
     }
   }
 
-#if defined(V8_ENABLE_SANDBOX)
-  // When v8 sandbox is enabled, external backing stores are not supported
-  // since all arraybuffer allocations are expected to be done by the isolate.
-  // Since this violates the contract of this function, let's free the data and
-  // throw an error.
-  free(data);
-  THROW_ERR_OPERATION_FAILED(
-      env->isolate(),
-      "Wrapping external data is not supported when the v8 sandbox is enabled");
-  return MaybeLocal<Object>();
-#else
   EscapableHandleScope handle_scope(env->isolate());
 
+#if defined(V8_ENABLE_SANDBOX)
+  // When the V8 sandbox is enabled, external backing stores are not supported
+  // because all ArrayBuffer allocations must live inside the sandbox address
+  // space. Copy the data into a V8-managed backing store and free the
+  // original.
+  MaybeLocal<Object> obj = Copy(env, data, length);
+  free(data);
+  return handle_scope.EscapeMaybe(obj);
+#else
   auto free_callback = [](void* data, size_t length, void* deleter_data) {
     free(data);
   };
