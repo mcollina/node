@@ -17,15 +17,12 @@ NPM="$ROOT/deps/npm/bin/npm-cli.js"
 . "$ROOT/tools/dep_updaters/utils.sh"
 
 NEW_VERSION="$("$NODE" --input-type=module <<'EOF'
-const res = await fetch('https://api.github.com/repos/nodejs/undici/releases/latest',
-  process.env.GITHUB_TOKEN && {
-    headers: {
-      "Authorization": `Bearer ${process.env.GITHUB_TOKEN}`
-    },
-  });
+const res = await fetch('https://registry.npmjs.org/undici');
 if (!res.ok) throw new Error(`FetchError: ${res.status} ${res.statusText}`, { cause: res });
-const { tag_name } = await res.json();
-console.log(tag_name.replace('v', ''));
+const pkg = await res.json();
+const version = pkg['dist-tags']?.seven;
+if (!version) throw new Error('No "seven" dist-tag found');
+console.log(version);
 EOF
 )"
 
