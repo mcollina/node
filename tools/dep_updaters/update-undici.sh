@@ -17,14 +17,19 @@ NPM="$ROOT/deps/npm/bin/npm-cli.js"
 . "$ROOT/tools/dep_updaters/utils.sh"
 
 NEW_VERSION="$("$NODE" --input-type=module <<'EOF'
-const res = await fetch('https://api.github.com/repos/nodejs/undici/releases/latest',
+const res = await fetch('https://api.github.com/repos/nodejs/undici/releases',
   process.env.GITHUB_TOKEN && {
     headers: {
       "Authorization": `Bearer ${process.env.GITHUB_TOKEN}`
     },
   });
 if (!res.ok) throw new Error(`FetchError: ${res.status} ${res.statusText}`, { cause: res });
-const { tag_name } = await res.json();
+const releases = await res.json();
+const v6Releases = releases.filter(({ tag_name }) => tag_name.startsWith('v6.'));
+if (v6Releases.length === 0) throw new Error('No v6.x releases found');
+// Sort by published_at (descending) to get the most recently published first
+v6Releases.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
+const { tag_name } = v6Releases[0];
 console.log(tag_name.replace('v', ''));
 EOF
 )"
