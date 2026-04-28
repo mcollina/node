@@ -17,12 +17,10 @@ NPM="$ROOT/deps/npm/bin/npm-cli.js"
 . "$ROOT/tools/dep_updaters/utils.sh"
 
 NEW_VERSION="$("$NODE" --input-type=module <<'EOF'
-const res = await fetch('https://registry.npmjs.org/undici');
+const res = await fetch('https://registry.npmjs.org/undici/seven');
 if (!res.ok) throw new Error(`FetchError: ${res.status} ${res.statusText}`, { cause: res });
 const pkg = await res.json();
-const version = pkg['dist-tags']?.seven;
-if (!version) throw new Error('No "seven" dist-tag found');
-console.log(version);
+console.log(pkg.version);
 EOF
 )"
 
