@@ -424,6 +424,26 @@ class Parser : public AsyncWrap, public StreamListener {
     headers_completed_ = true;
     header_nread_ = 0;
 
+    // When the incoming request cannot have a body, llhttp invokes
+    // on_message_complete() right after this callback returns, within the
+    // same execution. Coalesce the two JS callbacks into a single one: defer
+    // the headers-complete callback until on_message_complete() and pass
+    // `messageCompleted = true` to it. This is opt-in via initialize() and
+    // only used by the HTTP server. Upgrades keep the two-step protocol, and
+    // messages with a Content-Length or Transfer-Encoding header (and hence
+    // a potential body or trailers) are unaffected.
+    if (coalesce_headers_complete_ && parser_.type == HTTP_REQUEST &&
+        !parser_.upgrade && !have_flushed_ &&
+        (parser_.flags &
+         (F_CHUNKED | F_CONTENT_LENGTH | F_TRANSFER_ENCODING)) == 0) {
+      deferred_headers_complete_ = true;
+      return 0;
+    }
+
+    return CallHeadersCompleteCallback(false);
+  }
+
+  int CallHeadersCompleteCallback(bool message_completed) {
     // Arguments for the on-headers-complete javascript callback. This
     // list needs to be kept in sync with the actual argument list for
     // `parserOnHeadersComplete` in lib/_http_common.js.
@@ -437,6 +457,7 @@ class Parser : public AsyncWrap, public StreamListener {
       A_STATUS_MESSAGE,
       A_UPGRADE,
       A_SHOULD_KEEP_ALIVE,
+      A_MESSAGE_COMPLETED,
       A_MAX
     };
 
@@ -492,6 +513,9 @@ class Parser : public AsyncWrap, public StreamListener {
 
     argv[A_UPGRADE] = Boolean::New(env()->isolate(), parser_.upgrade);
 
+    argv[A_MESSAGE_COMPLETED] =
+        Boolean::New(env()->isolate(), message_completed);
+
     MaybeLocal<Value> head_response;
     {
       InternalCallbackScope callback_scope(
@@ -542,6 +566,27 @@ class Parser : public AsyncWrap, public StreamListener {
 
   int on_message_complete() {
     HandleScope scope(env()->isolate());
+
+    if (deferred_headers_complete_) {
+      // The headers-complete callback was deferred because this message
+      // cannot have a body (and therefore no trailers either): emit the
+      // single coalesced callback now. See on_headers_complete().
+      //
+      // The request handler runs inside this callback. It must run while the
+      // parser is still in the "active" list, matching the ordering of the
+      // non-coalesced path (where the handler runs in on_headers_complete,
+      // before the PopActive below): otherwise a handler that synchronously
+      // calls e.g. server.close() would observe the connection as already
+      // idle and close it.
+      deferred_headers_complete_ = false;
+      header_pairs_ = 0;
+      const int rv = CallHeadersCompleteCallback(true);
+      if (connectionsList_ != nullptr) {
+        connectionsList_->PopActive(this);
+      }
+      last_message_start_ = 0;
+      return rv < 0 ? -1 : 0;
+    }
 
     if (connectionsList_ != nullptr) {
       connectionsList_->PopActive(this);
@@ -707,6 +752,11 @@ class Parser : public AsyncWrap, public StreamListener {
       ASSIGN_OR_RETURN_UNWRAP(&connectionsList, args[4]);
     }
 
+    bool coalesce_headers_complete = false;
+    if (args.Length() > 5) {
+      coalesce_headers_complete = args[5]->IsTrue();
+    }
+
     llhttp_type_t type =
         static_cast<llhttp_type_t>(args[0].As<Int32>()->Value());
 
@@ -724,6 +774,8 @@ class Parser : public AsyncWrap, public StreamListener {
     parser->set_provider_type(provider);
     parser->AsyncReset(args[1].As<Object>());
     parser->Init(type, max_http_header_size, lenient_flags);
+    parser->coalesce_headers_complete_ = coalesce_headers_complete;
+    parser->deferred_headers_complete_ = false;
 
     if (connectionsList != nullptr) {
       parser->connectionsList_ = connectionsList;
@@ -883,11 +935,22 @@ class Parser : public AsyncWrap, public StreamListener {
       }
     }
 
+    // A deferred headers-complete callback (see on_headers_complete()) is
+    // normally consumed by on_message_complete() within the same execution.
+    // If parsing stopped in between for any reason, deliver it now so that
+    // the JS side stays consistent.
+    if (deferred_headers_complete_) {
+      deferred_headers_complete_ = false;
+      header_pairs_ = 0;
+      CallHeadersCompleteCallback(false);
+    }
+
     // Apply pending pause
     if (pending_pause_) {
       pending_pause_ = false;
       llhttp_pause(&parser_);
     }
+
 
     current_buffer_len_ = 0;
     current_buffer_data_ = nullptr;
@@ -1102,6 +1165,8 @@ class Parser : public AsyncWrap, public StreamListener {
   size_t header_pairs_ = 0;
   double max_header_pairs_ = -1;
   bool pending_pause_ = false;
+  bool coalesce_headers_complete_ = false;
+  bool deferred_headers_complete_ = false;
   bool received_data_ = false;
   uint64_t header_nread_ = 0;
   uint64_t chunk_extensions_nread_ = 0;
