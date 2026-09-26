@@ -273,11 +273,15 @@ void SetIsolateMiscHandlers(v8::Isolate* isolate, const IsolateSettings& s) {
     isolate->SetWasmStreamingCallback(wasm_web_api::StartStreamingCompilation);
   }
 
-  Mutex::ScopedLock lock(node::per_process::cli_options_mutex);
-  if (per_process::cli_options->get_per_isolate_options()
-          ->experimental_shadow_realm) {
-    isolate->SetHostCreateShadowRealmContextCallback(
-        shadow_realm::HostCreateShadowRealmContextCallback);
+  // Source position collection below walks the isolate's heap. Do not hold
+  // the options mutex during that work, so workers can initialize in parallel.
+  {
+    Mutex::ScopedLock lock(node::per_process::cli_options_mutex);
+    if (per_process::cli_options->get_per_isolate_options()
+            ->experimental_shadow_realm) {
+      isolate->SetHostCreateShadowRealmContextCallback(
+          shadow_realm::HostCreateShadowRealmContextCallback);
+    }
   }
 
   if ((s.flags & SHOULD_NOT_SET_PROMISE_REJECTION_CALLBACK) == 0) {
