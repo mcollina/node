@@ -83,6 +83,7 @@ class ExternalReferenceRegistry {
   V(glob)                                                                      \
   V(handle_wrap)                                                               \
   V(heap_utils)                                                                \
+  V(http_batch)                                                                \
   V(http_parser)                                                               \
   V(internal_only_v8)                                                          \
   V(ipc_serdes)                                                                \

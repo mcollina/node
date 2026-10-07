@@ -73,6 +73,7 @@
   V(glob)                                                                      \
   V(heap_utils)                                                                \
   V(http2)                                                                     \
+  V(http_batch)                                                                \
   V(http_parser)                                                               \
   V(inspector)                                                                 \
   V(internal_only_v8)                                                          \
