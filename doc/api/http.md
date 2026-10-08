@@ -3703,6 +3703,9 @@ Found'`.
 <!-- YAML
 added: v0.1.13
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/00000
+    description: The `batched` option is supported now.
   - version:
      - v26.3.0
      - v24.19.0
@@ -3835,6 +3838,8 @@ changes:
     already-ended body stream, so they will never emit any stream events
     (like `'data'` or `'end'`). You can use `req.readableEnded` to detect this case.
     **Default:** `false`.
+  * `batched` {boolean} If set to `true`, the server runs on the batched
+    transport described in [Batched servers][]. **Default:** `false`.
 
 * `requestListener` {Function}
 
@@ -3906,6 +3911,39 @@ server.on('request', (request, res) => {
 
 server.listen(8000);
 ```
+
+### Batched servers
+
+> Stability: 1 - Experimental
+
+With the `batched` option, connections, TLS and HTTP parsing are handled
+natively, and the requests that arrive during one iteration of the event loop
+reach JavaScript together, in a single call. The responses produced meanwhile
+go back the same way. Requests and responses are still
+[`http.IncomingMessage`][] and [`http.ServerResponse`][] objects, and the
+server is an [`http.Server`][], but it serves many more requests per second
+than a server built on [`net.Socket`][]s.
+
+The differences with the default server are:
+
+* `req.socket` is an object implementing the parts of [`net.Socket`][] that
+  HTTP servers use: addresses, `write()`, `end()`, `destroy()`,
+  `setTimeout()`, `pause()`, `resume()` and the `'close'`, `'timeout'` and
+  `'drain'` events. It does not emit `'data'`: the data of the connection
+  belongs to the server.
+* `'upgrade'` and `'connect'` listeners receive a [`net.Socket`][] for the
+  connection, or a {stream.Duplex} when the connection uses TLS, when the
+  request has a body, or on Windows.
+* Streams emitted as `'connection'` by user code are served by the default
+  implementation.
+* Pipelined requests are parsed ahead, up to 32 per connection.
+* Listening on file descriptors handed over by the cluster primary is not
+  supported on Windows.
+* With [`https.createServer()`][], the `'newSession'` and `'resumeSession'`
+  events, PSK and OCSP are not supported, and the socket of `'connection'` is
+  the TLS socket rather than the underlying TCP socket.
+* Connections are not async resources of their own: requests run in the
+  async context of the server.
 
 ## `http.get(options[, callback])`
 
@@ -4844,6 +4882,7 @@ const agent1 = new http.Agent({ proxyEnv: { http_proxy: 'http://proxy.example.co
 const agent2 = new http.Agent({ proxyEnv: process.env });
 ```
 
+[Batched servers]: #batched-servers
 [Built-in Proxy Support]: #built-in-proxy-support
 [RFC 8187]: https://www.rfc-editor.org/rfc/rfc8187.txt
 [RFC 9110 Section 6.6.1]: https://www.rfc-editor.org/rfc/rfc9110#section-6.6.1
@@ -4880,6 +4919,7 @@ const agent2 = new http.Agent({ proxyEnv: process.env });
 [`http.setGlobalProxyFromEnv()`]: #httpsetglobalproxyfromenvproxyenv
 [`http.validateHeaderName()`]: #httpvalidateheadernamename-label
 [`http.validateHeaderValue()`]: #httpvalidateheadervaluename-value
+[`https.createServer()`]: https.md#httpscreateserveroptions-requestlistener
 [`message.headers`]: #messageheaders
 [`message.rawHeaders`]: #messagerawheaders
 [`message.socket`]: #messagesocket

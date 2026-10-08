@@ -262,6 +262,8 @@ added: v0.3.4
 
 * `options` {Object} Accepts `options` from [`tls.createServer()`][],
   [`tls.createSecureContext()`][] and [`http.createServer()`][].
+  With `batched: true`, TLS runs in the batched transport of
+  [`http.createServer()`][]; see [Batched servers][].
 * `requestListener` {Function} A listener to be added to the `'request'` event.
 * Returns: {https.Server}
 
@@ -748,6 +750,7 @@ All OK. Server matched our pinned cert or public key
 statusCode: 200
 ```
 
+[Batched servers]: http.md#batched-servers
 [`Agent`]: #class-httpsagent
 [`Session Resumption`]: tls.md#session-resumption
 [`URL`]: url.md#the-whatwg-url-api
