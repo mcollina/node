@@ -8,12 +8,17 @@
 //
 // Request head record (native -> JS):
 //   u32 id, u8 flags, u8 method, u8 http_major, u8 http_minor,
-//   u32 url_length, u16 header_count, u16 reserved, url bytes, then
+//   u32 url_length, u16 header_count, u16 reserved, u32 connection_id,
+//   url bytes, then
 //   header_count times: u16 name (kKnownHeader | index, or the byte length
-//   followed by the lowercased name), u32 value_length, value bytes.
+//   followed by the name), u32 value_length, value bytes.
 // Request body record (native -> JS):
 //   u32 id, u32 length, data. Length 0 ends the body, kBodyAbort reports that
 //   the exchange was abandoned (client gone or parse error) and has no data.
+//   kConnectionClosed reports, in place of the request id, the connection
+//   id of a connection that carried at least one request and is now gone.
+//   kTrailers is followed by u32 length and the trailer fields of a chunked
+//   body: u16 count, then fields encoded as in the head record.
 // Response record (JS -> native), padded to a multiple of 4 bytes:
 //   u8 op, u8 flags, u16 status, u32 id, u32 head_length, u32 body_length,
 //   head bytes (status line and user headers, CRLF terminated), body bytes.
@@ -30,11 +35,16 @@
 #include "uv.h"
 #include "v8.h"
 
+#include <cerrno>
 #include <cstring>
 #include <ctime>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#ifndef _WIN32
+#include <unistd.h>  // dup()
+#endif
 
 namespace node {
 namespace http_batch {
@@ -60,14 +70,18 @@ using v8::Value;
 
 constexpr size_t kSlabSize = 64 * 1024;
 constexpr size_t kMaxPendingInput = 64 * 1024;
-constexpr size_t kHeadPrefix = 16;
+constexpr size_t kHeadPrefix = 20;
 constexpr size_t kResponsePrefix = 16;
 constexpr uint32_t kBodyAbort = 0xFFFFFFFF;
+constexpr uint32_t kConnectionClosed = 0xFFFFFFFE;
+constexpr uint32_t kTrailers = 0xFFFFFFFD;
 constexpr uint16_t kKnownHeader = 0x8000;
 constexpr uint64_t kSweepIntervalMs = 1000;
 
 enum HeadFlags : uint8_t {
   kHasBody = 1 << 0,
+  kUpgrade = 1 << 1,
+  kKeepAlive = 1 << 2,
 };
 
 enum ResponseOp : uint8_t {
@@ -76,6 +90,8 @@ enum ResponseOp : uint8_t {
   kOpEnd = 3,
   kOpComplete = 4,
   kOpDestroy = 5,
+  // Bytes already framed by JavaScript (node:http's ServerResponse).
+  kOpRaw = 6,
 };
 
 enum ResponseFlags : uint8_t {
@@ -133,21 +149,45 @@ static const char* const kKnownHeaders[] = {
     "sec-ch-ua-mobile",
     "sec-ch-ua-platform",
 };
-constexpr int kExpectHeader = 15;
+constexpr size_t kExpectHeader = 15;
 constexpr size_t kKnownHeaderCount = arraysize(kKnownHeaders);
 
+static inline char ToLower(char c) {
+  return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
+}
+
+static inline char ToUpper(char c) {
+  return (c >= 'a' && c <= 'z') ? c - ('a' - 'A') : c;
+}
+
+// Names are matched with their case preserved, because rawHeaders keeps the
+// case the client used. Every known header has two indexes: the lowercase
+// name, then its Canonical-Case spelling at kKnownHeaderCount + index.
+static const std::vector<std::string>& KnownHeaderNames() {
+  static const std::vector<std::string> names = [] {
+    std::vector<std::string> v;
+    for (size_t i = 0; i < kKnownHeaderCount; i++)
+      v.push_back(kKnownHeaders[i]);
+    for (size_t i = 0; i < kKnownHeaderCount; i++) {
+      std::string name = kKnownHeaders[i];
+      for (size_t j = 0; j < name.size(); j++) {
+        if (j == 0 || name[j - 1] == '-') name[j] = ToUpper(name[j]);
+      }
+      v.push_back(std::move(name));
+    }
+    return v;
+  }();
+  return names;
+}
+
 static int FindKnownHeader(const char* name, size_t len) {
-  for (size_t i = 0; i < kKnownHeaderCount; i++) {
-    const char* known = kKnownHeaders[i];
-    if (strlen(known) == len && memcmp(known, name, len) == 0) {
+  const std::vector<std::string>& names = KnownHeaderNames();
+  for (size_t i = 0; i < names.size(); i++) {
+    if (names[i].size() == len && memcmp(names[i].data(), name, len) == 0) {
       return static_cast<int>(i);
     }
   }
   return -1;
-}
-
-static inline char ToLower(char c) {
-  return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
 }
 
 static inline void WriteU16(std::string* s, size_t pos, uint16_t v) {
@@ -219,6 +259,7 @@ struct Connection {
   size_t value_pos = SIZE_MAX;
   int current_header = -1;
   uint32_t id = 0;
+  uint32_t connection_id = 0;
   uint32_t url_length = 0;
   uint32_t header_bytes = 0;
   uint16_t header_count = 0;
@@ -243,6 +284,14 @@ struct Connection {
   bool reading = false;
   bool touched = false;
   bool closing = false;
+  bool announced = false;    // JavaScript has seen this connection.
+  bool user_paused = false;  // JavaScript asked to stop reading.
+  bool read_eof = false;      // The client ended its side.
+  bool delivered = false;     // JavaScript has seen the current request.
+  bool eof_grace = false;     // One more iteration to answer after EOF.
+  bool in_eof_list = false;
+  bool headers_done = false;  // Fields from now on are trailers.
+  bool in_trailers = false;
 
   inline uv_stream_t* stream() {
     return reinterpret_cast<uv_stream_t*>(&handle);
@@ -286,6 +335,11 @@ class BatchServer : public BaseObject {
   static void Ref(const FunctionCallbackInfo<Value>& args);
   static void Unref(const FunctionCallbackInfo<Value>& args);
   static void SetTimeouts(const FunctionCallbackInfo<Value>& args);
+  static void Detach(const FunctionCallbackInfo<Value>& args);
+  static void CloseConnection(const FunctionCallbackInfo<Value>& args);
+  static void PauseConnection(const FunctionCallbackInfo<Value>& args);
+  static void ResumeConnection(const FunctionCallbackInfo<Value>& args);
+  static void ConnectionAddress(const FunctionCallbackInfo<Value>& args);
 
   void MemoryInfo(MemoryTracker* tracker) const override;
   SET_MEMORY_INFO_NAME(BatchServer)
@@ -299,7 +353,34 @@ class BatchServer : public BaseObject {
   void PushHead(Connection* conn) {
     heads_.append(conn->head);
     ids_[conn->id] = conn;
+    conn->delivered = false;
+    pushed_.push_back(conn);
     ScheduleFlush();
+  }
+
+  void AddEof(Connection* conn) {
+    if (!conn->in_eof_list) {
+      conn->in_eof_list = true;
+      eof_.push_back(conn);
+    }
+    ScheduleFlush();
+  }
+
+  void RemoveEof(Connection* conn) {
+    if (!conn->in_eof_list) return;
+    conn->in_eof_list = false;
+    for (size_t i = 0; i < eof_.size(); i++) {
+      if (eof_[i] == conn) {
+        eof_.erase(eof_.begin() + i);
+        break;
+      }
+    }
+  }
+
+  void ForgetPushed(Connection* conn) {
+    for (size_t i = 0; i < pushed_.size(); i++) {
+      if (pushed_[i] == conn) pushed_[i] = nullptr;
+    }
   }
 
   void PushBody(uint32_t id, const char* data, uint32_t len) {
@@ -310,6 +391,25 @@ class BatchServer : public BaseObject {
   }
 
   void Forget(uint32_t id) { ids_.erase(id); }
+
+  void PushTrailers(uint32_t id, const std::string& fields) {
+    AppendU32(&bodies_, id);
+    AppendU32(&bodies_, kTrailers);
+    AppendU32(&bodies_, static_cast<uint32_t>(fields.size()));
+    bodies_.append(fields);
+    ScheduleFlush();
+  }
+
+  void PushConnectionClosed(uint32_t connection_id) {
+    AppendU32(&bodies_, connection_id);
+    AppendU32(&bodies_, kConnectionClosed);
+    ScheduleFlush();
+  }
+
+  Connection* FindConnection(uint32_t connection_id) {
+    auto it = connections_by_id_.find(connection_id);
+    return it == connections_by_id_.end() ? nullptr : it->second;
+  }
   void Link(Connection* conn);
   void Unlink(Connection* conn);
 
@@ -326,6 +426,8 @@ class BatchServer : public BaseObject {
 
   void ScheduleFlush();
   void Flush();
+  void DeliverBatch();
+  void ProcessEof();
   void ApplyResponses(const uint8_t* data, size_t len);
   void WriteHead(Connection* conn,
                  uint8_t flags,
@@ -355,7 +457,11 @@ class BatchServer : public BaseObject {
   std::string heads_;
   std::string bodies_;
   std::unordered_map<uint32_t, Connection*> ids_;
+  std::unordered_map<uint32_t, Connection*> connections_by_id_;
   std::vector<Connection*> touched_;
+  // Connections whose head is in heads_, and connections the client ended.
+  std::vector<Connection*> pushed_;
+  std::vector<Connection*> eof_;
   Connection* connections_ = nullptr;
   size_t connection_count_ = 0;
 
@@ -365,6 +471,7 @@ class BatchServer : public BaseObject {
   time_t date_time_ = 0;
   std::string date_;
   uint32_t next_id_ = 0;
+  uint32_t next_connection_id_ = 0;
   bool flush_scheduled_ = false;
   bool listening_ = false;
   bool closing_ = false;
@@ -386,6 +493,8 @@ static int OnMessageBegin(llhttp_t* p) {
   conn->current_header = -1;
   conn->in_header_field = false;
   conn->in_message = true;
+  conn->headers_done = false;
+  conn->in_trailers = false;
   conn->expect_continue = false;
   conn->message_start = uv_now(conn->server->loop());
   return 0;
@@ -410,16 +519,19 @@ static int OnUrl(llhttp_t* p, const char* at, size_t len) {
 
 static int OnHeaderField(llhttp_t* p, const char* at, size_t len) {
   Connection* conn = Connection::From(p);
+  if (conn->headers_done && !conn->in_trailers) {
+    conn->in_trailers = true;
+    conn->head.assign(2, '\0');
+    conn->header_count = 0;
+    conn->value_pos = SIZE_MAX;
+  }
   if (!conn->in_header_field) {
     conn->FinishValue();
     conn->in_header_field = true;
     conn->name_pos = conn->head.size();
     conn->head.append(2, '\0');
   }
-  size_t start = conn->head.size();
-  conn->head.resize(start + len);
-  char* dst = &conn->head[start];
-  for (size_t i = 0; i < len; i++) dst[i] = ToLower(at[i]);
+  conn->head.append(at, len);
   return CountHeaderBytes(conn, len);
 }
 
@@ -454,7 +566,10 @@ void Connection::FinishValue() {
   head.resize(end);
   uint32_t value_length = static_cast<uint32_t>(end - value_pos - 4);
   WriteU32(&head, value_pos, value_length);
-  if (current_header == kExpectHeader && value_length == 12) {
+  if (current_header >= 0 &&
+      static_cast<size_t>(current_header) % kKnownHeaderCount ==
+          kExpectHeader &&
+      value_length == 12) {
     const char* v = head.data() + value_pos + 4;
     static const char kContinue[] = "100-continue";
     bool match = true;
@@ -486,6 +601,7 @@ static int OnHeadersComplete(llhttp_t* p) {
   BatchServer* server = conn->server;
   conn->FinishValue();
   conn->in_message = false;
+  conn->headers_done = true;
   conn->id = server->NextId();
   conn->has_body = (p->flags & F_CHUNKED) ||
                    ((p->flags & F_CONTENT_LENGTH) && p->content_length > 0);
@@ -498,12 +614,16 @@ static int OnHeadersComplete(llhttp_t* p) {
 
   std::string& h = conn->head;
   WriteU32(&h, 0, conn->id);
-  h[4] = static_cast<char>(conn->has_body ? kHasBody : 0);
+  h[4] = static_cast<char>((conn->has_body ? kHasBody : 0) |
+                           (p->upgrade ? kUpgrade : 0) |
+                           (conn->keep_alive ? kKeepAlive : 0));
   h[5] = static_cast<char>(p->method);
   h[6] = static_cast<char>(p->http_major);
   h[7] = static_cast<char>(p->http_minor);
   WriteU32(&h, 8, conn->url_length);
   WriteU16(&h, 12, conn->header_count);
+  WriteU32(&h, 16, conn->connection_id);
+  conn->announced = true;
   server->PushHead(conn);
 
   if (conn->expect_continue && conn->has_body && !conn->http10) {
@@ -527,7 +647,15 @@ static int OnMessageComplete(llhttp_t* p) {
   conn->request_complete = true;
   conn->last_active = uv_now(conn->server->loop());
   if (!conn->response_done) {
+    if (conn->in_trailers) {
+      conn->FinishValue();
+      WriteU16(&conn->head, 0, conn->header_count);
+      conn->server->PushTrailers(conn->id, conn->head);
+    }
     if (conn->has_body) conn->server->PushBody(conn->id, nullptr, 0);
+    // Whatever follows an upgrade request may belong to another protocol:
+    // leave it in the kernel until JavaScript takes the connection over.
+    if (p->upgrade) conn->StopReading();
     return HPE_PAUSED;
   }
   // The response went out before the body was fully read.
@@ -568,6 +696,8 @@ void Connection::ResetExchange() {
   response_done = false;
   response_no_body = false;
   chunked = false;
+  delivered = false;
+  eof_grace = false;
 }
 
 void Connection::Feed(const char* data, size_t len) {
@@ -585,13 +715,13 @@ void Connection::Execute(const char* data, size_t len) {
   if (err == HPE_PAUSED || err == HPE_PAUSED_UPGRADE) {
     paused = true;
     if (err == HPE_PAUSED_UPGRADE) {
-      // Bytes after an upgrade request are not HTTP; drop them.
+      // Bytes after an upgrade request are not HTTP. They are handed over
+      // with the connection by detach(), or dropped with it.
       close_after_response = true;
       StopReading();
-    } else {
-      const char* pos = llhttp_get_error_pos(&parser);
-      pending_input.assign(pos, data + len - pos);
     }
+    const char* pos = llhttp_get_error_pos(&parser);
+    pending_input.assign(pos, data + len - pos);
     // Paused after an early response that closes the connection.
     if (response_done && request_complete) FinishExchange();
     return;
@@ -638,6 +768,10 @@ void Connection::FinishExchange() {
       pending_input.swap(input);
     }
   }
+  if (read_eof) {
+    if (id == 0 && !closing) Shutdown();
+    return;
+  }
   if (!paused && !closing) StartReading();
 }
 
@@ -656,11 +790,18 @@ static void OnRead(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
     conn->Feed(buf->base, static_cast<size_t>(nread));
   } else if (nread == UV_EOF) {
     conn->StopReading();
-    // A client may half-close after sending a complete request.
-    if (conn->id != 0 && conn->request_complete && !conn->response_done) {
-      conn->close_after_response = true;
+    conn->read_eof = true;
+    if (conn->id != 0 && !conn->request_complete) {
+      // The request body was cut short.
+      if (!conn->response_done) {
+        conn->server->PushBody(conn->id, nullptr, kBodyAbort);
+        conn->response_done = true;
+      }
+      conn->Shutdown();
+    } else if (conn->id == 0 && conn->pending_input.empty()) {
+      conn->Shutdown();
     } else {
-      conn->Close(true);
+      conn->server->AddEof(conn);
     }
   } else if (nread < 0) {
     conn->Close(true);
@@ -668,7 +809,7 @@ static void OnRead(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
 }
 
 void Connection::StartReading() {
-  if (reading || closing) return;
+  if (reading || closing || user_paused) return;
   if (uv_read_start(stream(), OnAlloc, OnRead) == 0) reading = true;
 }
 
@@ -739,8 +880,11 @@ void Connection::Close(bool notify) {
   closing = true;
   reading = false;
   if (server != nullptr) {
+    server->RemoveEof(this);
+    server->ForgetPushed(this);
     if (id != 0 && !response_done && notify)
       server->PushBody(id, nullptr, kBodyAbort);
+    if (announced) server->PushConnectionClosed(connection_id);
     ResetExchange();
     server->Unlink(this);
   }
@@ -834,6 +978,11 @@ void BatchServer::Link(Connection* conn) {
   if (connections_ != nullptr) connections_->prev = conn;
   connections_ = conn;
   connection_count_++;
+  do {
+    conn->connection_id = ++next_connection_id_;
+  } while (conn->connection_id == 0 ||
+           connections_by_id_.count(conn->connection_id) != 0);
+  connections_by_id_[conn->connection_id] = conn;
 }
 
 void BatchServer::Unlink(Connection* conn) {
@@ -844,6 +993,7 @@ void BatchServer::Unlink(Connection* conn) {
   }
   if (conn->next != nullptr) conn->next->prev = conn->prev;
   conn->prev = conn->next = nullptr;
+  connections_by_id_.erase(conn->connection_id);
   connection_count_--;
   MaybeEmitClose();
 }
@@ -865,8 +1015,53 @@ void BatchServer::Flush() {
   flush_scheduled_ = false;
   uv_check_stop(check_);
   uv_idle_stop(idle_);
-  if (heads_.empty() && bodies_.empty()) return;
+  if (!heads_.empty() || !bodies_.empty()) {
+    for (Connection* conn : pushed_) {
+      if (conn != nullptr) conn->delivered = true;
+    }
+    pushed_.clear();
+    DeliverBatch();
+  }
+  ProcessEof();
+}
 
+// After the client ends its side, node:http still answers the requests it
+// had already received, and aborts the ones left unanswered when the socket
+// closes. Requests delivered to JavaScript get one more loop iteration to
+// be answered (responses produced from setImmediate() or promises), then the
+// connection closes.
+void BatchServer::ProcessEof() {
+  for (size_t i = 0; i < eof_.size();) {
+    Connection* conn = eof_[i];
+    if (conn->closing) {
+      conn->in_eof_list = false;
+      eof_.erase(eof_.begin() + i);
+      continue;
+    }
+    if (conn->id == 0) {
+      conn->in_eof_list = false;
+      eof_.erase(eof_.begin() + i);
+      conn->Shutdown();
+      continue;
+    }
+    if (conn->delivered && !conn->response_done) {
+      if (!conn->eof_grace) {
+        conn->eof_grace = true;
+        ScheduleFlush();
+      } else {
+        PushBody(conn->id, nullptr, kBodyAbort);
+        conn->response_done = true;
+        conn->in_eof_list = false;
+        eof_.erase(eof_.begin() + i);
+        conn->Shutdown();
+        continue;
+      }
+    }
+    i++;
+  }
+}
+
+void BatchServer::DeliverBatch() {
   Isolate* isolate = env()->isolate();
   HandleScope handle_scope(isolate);
   Local<Context> context = env()->context();
@@ -1067,7 +1262,13 @@ void BatchServer::ApplyResponses(const uint8_t* data, size_t len) {
         AppendChunk(conn, body, body_length);
         break;
       case kOpEnd:
+        if (flags & kUserConnectionClose) conn->close_after_response = true;
         EndResponse(conn);
+        break;
+      case kOpRaw:
+        conn->response_started = true;
+        conn->chunked = false;
+        conn->out.append(reinterpret_cast<const char*>(body), body_length);
         break;
       case kOpDestroy:
         conn->out.clear();
@@ -1346,6 +1547,84 @@ void BatchServer::SetTimeouts(const FunctionCallbackInfo<Value>& args) {
   if (max_header_size != 0) server->max_header_size_ = max_header_size;
 }
 
+static Connection* ConnectionFromArgs(
+    const FunctionCallbackInfo<Value>& args) {
+  BatchServer* server;
+  ASSIGN_OR_RETURN_UNWRAP(&server, args.This(), nullptr);
+  CHECK(args[0]->IsUint32());
+  Connection* conn =
+      server->FindConnection(args[0].As<Uint32>()->Value());
+  if (conn == nullptr || conn->closing) return nullptr;
+  return conn;
+}
+
+// detach(connectionId) hands the connection over to JavaScript: it returns
+// [fd, unparsed bytes] for a duplicate of the socket descriptor and forgets
+// the connection, or a negative libuv error code.
+void BatchServer::Detach(const FunctionCallbackInfo<Value>& args) {
+  Connection* conn = ConnectionFromArgs(args);
+  if (conn == nullptr) return args.GetReturnValue().Set(UV_EBADF);
+  // Queued writes would be cancelled by the close below.
+  if (conn->writes_in_flight != 0 || !conn->out.empty())
+    return args.GetReturnValue().Set(UV_EBUSY);
+#ifdef _WIN32
+  args.GetReturnValue().Set(UV_ENOTSUP);
+#else
+  Environment* env = conn->env;
+  uv_os_fd_t fd;
+  int err = uv_fileno(reinterpret_cast<uv_handle_t*>(&conn->handle), &fd);
+  if (err != 0) return args.GetReturnValue().Set(err);
+  Local<Object> head;
+  if (!Buffer::Copy(env, conn->pending_input.data(), conn->pending_input.size())
+           .ToLocal(&head)) {
+    return;
+  }
+  int duplicate = dup(fd);
+  if (duplicate < 0) return args.GetReturnValue().Set(-errno);
+  conn->pending_input.clear();
+  conn->announced = false;
+  conn->Close(false);
+  Local<Value> result[] = {Integer::New(env->isolate(), duplicate), head};
+  args.GetReturnValue().Set(
+      Array::New(env->isolate(), result, arraysize(result)));
+#endif
+}
+
+void BatchServer::CloseConnection(const FunctionCallbackInfo<Value>& args) {
+  Connection* conn = ConnectionFromArgs(args);
+  if (conn != nullptr) conn->Close(true);
+}
+
+void BatchServer::PauseConnection(const FunctionCallbackInfo<Value>& args) {
+  Connection* conn = ConnectionFromArgs(args);
+  if (conn == nullptr) return;
+  conn->user_paused = true;
+  conn->StopReading();
+}
+
+void BatchServer::ResumeConnection(const FunctionCallbackInfo<Value>& args) {
+  Connection* conn = ConnectionFromArgs(args);
+  if (conn == nullptr) return;
+  conn->user_paused = false;
+  if (conn->pending_input.size() <= kMaxPendingInput) conn->StartReading();
+}
+
+// connectionAddress(connectionId, remote, out) fills out with the remote or
+// local address of the connection and returns a libuv error code.
+void BatchServer::ConnectionAddress(const FunctionCallbackInfo<Value>& args) {
+  Connection* conn = ConnectionFromArgs(args);
+  if (conn == nullptr) return args.GetReturnValue().Set(UV_EBADF);
+  CHECK(args[2]->IsObject());
+  sockaddr_storage storage;
+  int len = sizeof(storage);
+  sockaddr* addr = reinterpret_cast<sockaddr*>(&storage);
+  int err = args[1]->IsTrue()
+                ? uv_tcp_getpeername(&conn->handle, addr, &len)
+                : uv_tcp_getsockname(&conn->handle, addr, &len);
+  if (err == 0) AddressToJS(conn->env, addr, args[2].As<Object>());
+  args.GetReturnValue().Set(err);
+}
+
 static void Initialize(Local<Object> target,
                        Local<Value> unused,
                        Local<Context> context,
@@ -1367,11 +1646,18 @@ static void Initialize(Local<Object> target,
   SetProtoMethod(isolate, t, "ref", BatchServer::Ref);
   SetProtoMethod(isolate, t, "unref", BatchServer::Unref);
   SetProtoMethod(isolate, t, "setTimeouts", BatchServer::SetTimeouts);
+  SetProtoMethod(isolate, t, "detach", BatchServer::Detach);
+  SetProtoMethod(isolate, t, "closeConnection", BatchServer::CloseConnection);
+  SetProtoMethod(isolate, t, "pauseConnection", BatchServer::PauseConnection);
+  SetProtoMethod(
+      isolate, t, "resumeConnection", BatchServer::ResumeConnection);
+  SetProtoMethod(
+      isolate, t, "connectionAddress", BatchServer::ConnectionAddress);
   SetConstructorFunction(context, target, "BatchServer", t);
 
   v8::LocalVector<Value> headers(isolate);
-  for (size_t i = 0; i < kKnownHeaderCount; i++) {
-    headers.push_back(OneByteString(isolate, kKnownHeaders[i]));
+  for (const std::string& name : KnownHeaderNames()) {
+    headers.push_back(OneByteString(isolate, name.data(), name.size()));
   }
   target
       ->Set(context,
@@ -1405,6 +1691,11 @@ static void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
   registry->Register(BatchServer::Ref);
   registry->Register(BatchServer::Unref);
   registry->Register(BatchServer::SetTimeouts);
+  registry->Register(BatchServer::Detach);
+  registry->Register(BatchServer::CloseConnection);
+  registry->Register(BatchServer::PauseConnection);
+  registry->Register(BatchServer::ResumeConnection);
+  registry->Register(BatchServer::ConnectionAddress);
 }
 
 }  // namespace http_batch

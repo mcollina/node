@@ -325,8 +325,8 @@ test('method, URL and header names decode exactly', async () => {
   const body = JSON.parse(text.slice(text.indexOf('\r\n\r\n') + 4));
   assert.deepStrictEqual(body, [
     'PURGE', '/hi?x=1',
-    ['host', 'x', 'x-forwarded-ssl', 'on', 'x-forwarded-for', '1.2.3.4',
-     'connection', 'close'],
+    ['Host', 'x', 'X-Forwarded-Ssl', 'on', 'X-Forwarded-For', '1.2.3.4',
+     'Connection', 'close'],
   ]);
   await stop(server);
 });
