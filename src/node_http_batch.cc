@@ -92,6 +92,9 @@ enum ResponseOp : uint8_t {
   kOpDestroy = 5,
   // Bytes already framed by JavaScript (node:http's ServerResponse).
   kOpRaw = 6,
+  // Ends the connection once everything queued before is written. The id
+  // field holds a connection id.
+  kOpShutdown = 7,
 };
 
 enum ResponseFlags : uint8_t {
@@ -283,6 +286,7 @@ struct Connection {
   bool paused = false;
   bool reading = false;
   bool touched = false;
+  bool shutdown_requested = false;
   bool closing = false;
   bool announced = false;    // JavaScript has seen this connection.
   bool user_paused = false;  // JavaScript asked to stop reading.
@@ -413,7 +417,6 @@ class BatchServer : public BaseObject {
   void Link(Connection* conn);
   void Unlink(Connection* conn);
 
-  bool closing() const { return closing_; }
   uint64_t max_header_size() const { return max_header_size_; }
   uv_loop_t* loop() { return env()->event_loop(); }
   char* slab() { return slab_.get(); }
@@ -659,8 +662,7 @@ static int OnMessageComplete(llhttp_t* p) {
     return HPE_PAUSED;
   }
   // The response went out before the body was fully read.
-  if (!conn->keep_alive || conn->close_after_response ||
-      conn->server->closing()) {
+  if (!conn->keep_alive || conn->close_after_response) {
     return HPE_PAUSED;
   }
   conn->ResetExchange();
@@ -749,7 +751,9 @@ void Connection::OnParseError(llhttp_errno_t err) {
 
 void Connection::FinishExchange() {
   last_active = uv_now(server->loop());
-  bool close = !keep_alive || close_after_response || server->closing();
+  // As in node:http, close() does not end busy keep-alive connections; they
+  // stay open until they are idle and time out, or the client leaves.
+  bool close = !keep_alive || close_after_response;
   ResetExchange();
   if (close) {
     Shutdown();
@@ -1172,7 +1176,7 @@ void BatchServer::WriteHead(Connection* conn,
   if (!(flags & kUserDate)) out.append(date_);
 
   if (flags & kUserConnectionClose) conn->close_after_response = true;
-  bool close = conn->close_after_response || !conn->keep_alive || closing_;
+  bool close = conn->close_after_response || !conn->keep_alive;
 
   if (complete) {
     conn->chunked = false;
@@ -1244,6 +1248,17 @@ void BatchServer::ApplyResponses(const uint8_t* data, size_t len) {
     p += (record + 3) & ~uint64_t{3};
     if (p > end) p = end;
 
+    if (op == kOpShutdown) {
+      Connection* conn = FindConnection(id);
+      if (conn == nullptr || conn->closing) continue;
+      conn->shutdown_requested = true;
+      if (!conn->touched) {
+        conn->touched = true;
+        touched_.push_back(conn);
+      }
+      continue;
+    }
+
     auto it = ids_.find(id);
     if (it == ids_.end()) continue;  // The client went away.
     Connection* conn = it->second;
@@ -1290,8 +1305,12 @@ void BatchServer::ApplyResponses(const uint8_t* data, size_t len) {
     conn->touched = false;
     if (conn->closing) continue;
     conn->FlushOut();
-    if (conn->response_done && conn->request_complete && !conn->closing)
+    if (conn->shutdown_requested) {
+      conn->Shutdown();
+    } else if (conn->response_done && conn->request_complete &&
+               !conn->closing) {
       conn->FinishExchange();
+    }
   }
   touched_.clear();
 }
