@@ -8,11 +8,17 @@ const bench = common.createBenchmark(main, {
   chunks: [1, 4],
   c: [50, 500],
   chunkedEnc: [1, 0],
+  batched: [0, 1],
   duration: 5,
 });
 
-function main({ type, len, chunks, c, chunkedEnc, duration }) {
-  const server = require('../fixtures/simple-http-server.js')
+function main({ type, len, chunks, c, chunkedEnc, batched, duration }) {
+  let server = require('../fixtures/simple-http-server.js');
+  if (batched) {
+    process.removeAllListeners('warning');
+    server = require('http').createServer({ batched: true }, server.handler);
+  }
+  server
   .listen(0)
   .on('listening', () => {
     const path = `/${type}/${len}/${chunks}/normal/${chunkedEnc}`;

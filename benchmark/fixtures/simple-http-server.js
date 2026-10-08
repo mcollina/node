@@ -21,7 +21,7 @@ if (useDomains) {
   gdom.enter();
 }
 
-module.exports = http.createServer((req, res) => {
+function handler(req, res) {
   if (useDomains) {
     const dom = domain.create();
     dom.add(req);
@@ -136,4 +136,7 @@ module.exports = http.createServer((req, res) => {
   } else {
     res.end(body);
   }
-});
+}
+
+module.exports = http.createServer(handler);
+module.exports.handler = handler;
