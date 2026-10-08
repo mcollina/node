@@ -52,6 +52,7 @@
 #include "node_buffer.h"
 #include "node_external_reference.h"
 #include "node_internals.h"
+#include "string_bytes.h"
 #include "util-inl.h"
 #include "uv.h"
 #include "v8.h"
@@ -146,6 +147,14 @@ enum ResponseOp : uint8_t {
   // and upgraded streams.
   kOpConnectionRaw = 8,
 };
+
+// Set on the op of a record whose body stays in JavaScript memory: the body
+// bytes are the index of its ArrayBufferView in the externals array, and the
+// body length is the one of the view.
+// The body is a string there, encoded by native code; latin1 with
+// kOpLatin1Body, UTF-8 otherwise. Its body length is computed here.
+constexpr uint8_t kOpExternalBody = 0x80;
+constexpr uint8_t kOpLatin1Body = 0x40;
 
 enum ResponseFlags : uint8_t {
   kUserContentLength = 1 << 0,
@@ -302,7 +311,8 @@ static inline uint32_t ReadU32(const uint8_t* p) {
          (static_cast<uint32_t>(p[3]) << 24);
 }
 
-static void AppendDecimal(std::string* s, uint64_t v) {
+template <typename Out>
+static void AppendDecimal(Out* s, uint64_t v) {
   char buf[24];
   size_t i = sizeof(buf);
   do {
@@ -312,7 +322,8 @@ static void AppendDecimal(std::string* s, uint64_t v) {
   s->append(buf + i, sizeof(buf) - i);
 }
 
-static void AppendHex(std::string* s, uint64_t v) {
+template <typename Out>
+static void AppendHex(Out* s, uint64_t v) {
   static const char digits[] = "0123456789abcdef";
   char buf[16];
   size_t i = sizeof(buf);
@@ -333,6 +344,141 @@ class BatchServer;
 // One request whose response is not finished yet. The front exchange of a
 // connection is the one being answered; the back one is the one being
 // parsed.
+// Bytes to write. Small writes are appended to an owned tail; large bodies
+// stay in the memory JavaScript gave them in and are written from there with
+// the rest in one writev().
+class OutQueue {
+ public:
+  struct Segment {
+    std::string owned;
+    std::unique_ptr<char[]> heap;
+    std::shared_ptr<BackingStore> store;  // Keeps `external` alive.
+    const char* external = nullptr;       // In `heap` or `store`.
+    size_t length = 0;
+    size_t offset = 0;  // Bytes already written.
+
+    const char* data() const {
+      return (external != nullptr ? external : owned.data()) + offset;
+    }
+    size_t size() const {
+      return (external != nullptr ? length : owned.size()) - offset;
+    }
+  };
+
+  bool empty() const { return size_ == 0; }
+  size_t size() const { return size_; }
+
+  void append(const char* data, size_t length) {
+    tail_.append(data, length);
+    size_ += length;
+  }
+  void append(const char* str) { append(str, strlen(str)); }
+  void append(const std::string& str) { append(str.data(), str.size()); }
+  void reserve(size_t n) { tail_.reserve(n); }
+
+  // Room for `length` bytes at the end, filled by the caller.
+  char* AppendUninitialized(size_t length) {
+    size_t start = tail_.size();
+    tail_.resize(start + length);
+    size_ += length;
+    return &tail_[start];
+  }
+
+  void AppendExternal(std::shared_ptr<BackingStore> store,
+                      const char* data,
+                      size_t length) {
+    if (length == 0) return;
+    Seal();
+    Segment segment;
+    segment.store = std::move(store);
+    segment.external = data;
+    segment.length = length;
+    segments_.push_back(std::move(segment));
+    size_ += length;
+  }
+
+  // `length` bytes the caller fills, in memory of their own: no copy of
+  // what is queued before, and no zeroing.
+  char* AppendAllocated(size_t length) {
+    Seal();
+    Segment segment;
+    segment.heap.reset(new char[length]);
+    segment.external = segment.heap.get();
+    segment.length = length;
+    segments_.push_back(std::move(segment));
+    size_ += length;
+    return segments_.back().heap.get();
+  }
+
+  // Moves everything in `other` to the end of this queue.
+  void Splice(OutQueue* other) {
+    if (other->segments_.empty()) {
+      append(other->tail_);
+    } else {
+      Seal();
+      other->Seal();
+      for (Segment& segment : other->segments_)
+        segments_.push_back(std::move(segment));
+      size_ += other->size_;
+    }
+    other->clear();
+  }
+
+  void clear() {
+    segments_.clear();
+    tail_.clear();
+    size_ = 0;
+  }
+
+  // Calls fn(data, length) for every run of bytes, in order.
+  template <typename Fn>
+  void ForEach(Fn fn) const {
+    for (const Segment& segment : segments_) fn(segment.data(), segment.size());
+    if (!tail_.empty()) fn(tail_.data(), tail_.size());
+  }
+
+  size_t Count() const { return segments_.size() + (tail_.empty() ? 0 : 1); }
+
+  // Drops the first `n` bytes, which were written.
+  void Consume(size_t n) {
+    Seal();
+    size_ -= n;
+    size_t done = 0;
+    while (n > 0) {
+      Segment& segment = segments_[done];
+      size_t length = segment.size();
+      if (n < length) {
+        segment.offset += n;
+        break;
+      }
+      n -= length;
+      done++;
+    }
+    segments_.erase(segments_.begin(), segments_.begin() + done);
+  }
+
+  // Hands every byte over as segments; the queue is left empty.
+  std::vector<Segment> Take() {
+    Seal();
+    std::vector<Segment> segments;
+    segments.swap(segments_);
+    size_ = 0;
+    return segments;
+  }
+
+ private:
+  void Seal() {
+    if (tail_.empty()) return;
+    Segment segment;
+    segment.owned.swap(tail_);
+    segments_.push_back(std::move(segment));
+  }
+
+  std::vector<Segment> segments_;
+  std::string tail_;
+  size_t size_ = 0;
+};
+
 struct Exchange {
   uint32_t id = 0;
   bool keep_alive = true;
@@ -347,7 +493,7 @@ struct Exchange {
   bool chunked = false;
   bool response_done = false;
   bool close_after = false;  // The response ends the connection.
-  std::string out;           // Response bytes waiting for earlier responses.
+  OutQueue out;              // Response bytes waiting for earlier responses.
 };
 
 struct Connection {
@@ -364,7 +510,7 @@ struct Connection {
   std::deque<Exchange> exchanges;
   std::string head;           // Request head record being built.
   std::string pending_input;  // Unparsed bytes while the parser is paused.
-  std::string out;            // Bytes to write, staged during one call.
+  OutQueue out;               // Bytes to write, staged during one call.
   const char* user_error = nullptr;  // "HPE_CODE:Reason" of our callbacks.
   std::string parse_error;           // "code\0reason\0" once parsing failed.
 
@@ -414,7 +560,7 @@ struct Connection {
   ncrypto::SSLPointer ssl;  // Owns the BIOs too.
   BIO* tls_in = nullptr;
   BIO* tls_out = nullptr;
-  std::string wire;
+  OutQueue wire;
   BaseObjectPtr<crypto::SecureContext> sni_context;
   uint64_t reneg_window_start = 0;
   uint32_t renegotiations = 0;
@@ -439,11 +585,12 @@ struct Connection {
 
   // Where the response bytes of `ex` go: straight to the socket for the
   // front exchange, buffered otherwise.
-  std::string& Target(Exchange* ex) {
+  OutQueue& Target(Exchange* ex) {
     return ex == &exchanges.front() ? out : ex->out;
   }
 
   bool CanParseMore() const;
+  size_t PendingOutput() const;
   void Execute(const char* data, size_t len);
   void Feed(const char* data, size_t len);
   void Advance();
@@ -455,7 +602,7 @@ struct Connection {
   void StartReading();
   void StopReading();
   void FlushOut();
-  void WriteWire(std::string* data);
+  void WriteWire(OutQueue* data);
   void CheckDrain();
   void Touch();
   void SetTimeout(uint64_t ms);
@@ -643,7 +790,9 @@ class BatchServer : public AsyncWrap {
   void Flush();
   void DeliverBatch();
   void ProcessEof();
-  void ApplyResponses(const uint8_t* data, size_t len);
+  void ApplyResponses(const uint8_t* data,
+                      size_t len,
+                      Local<Array> externals);
   void WriteHead(Connection* conn,
                  Exchange* ex,
                  uint8_t flags,
@@ -1120,8 +1269,7 @@ void Connection::Advance() {
       return;
     }
     if (!exchanges.empty() && !exchanges.front().out.empty()) {
-      out.append(exchanges.front().out);
-      exchanges.front().out.clear();
+      out.Splice(&exchanges.front().out);
       FlushOut();
       if (closing) return;
     }
@@ -1457,12 +1605,21 @@ void Connection::Touch() {
 struct WriteReq {
   uv_write_t req;
   Connection* conn;
-  std::string data;
+  std::vector<OutQueue::Segment> data;
 };
+
+// Response bytes not handed to the kernel yet, including those of pipelined
+// responses that wait for earlier ones.
+size_t Connection::PendingOutput() const {
+  size_t pending = uv_stream_get_write_queue_size(
+      reinterpret_cast<const uv_stream_t*>(&h)) + out.size();
+  for (const Exchange& ex : exchanges) pending += ex.out.size();
+  return pending;
+}
 
 void Connection::CheckDrain() {
   if (!drain_wanted || server == nullptr || closing) return;
-  if (uv_stream_get_write_queue_size(stream()) != 0 || !out.empty()) return;
+  if (PendingOutput() != 0) return;
   drain_wanted = false;
   server->PushRecord(connection_id, kDrain);
 }
@@ -1502,19 +1659,22 @@ void Connection::FlushOut() {
   if (ssl) {
     if (!out.empty()) {
       // Memory BIOs never apply backpressure, so this writes everything.
-      if (SSL_write(ssl, out.data(), static_cast<int>(out.size())) <= 0) {
-        out.clear();
+      bool failed = false;
+      out.ForEach([&](const char* data, size_t length) {
+        if (!failed && SSL_write(ssl, data, static_cast<int>(length)) <= 0)
+          failed = true;
+      });
+      out.clear();
+      if (failed) {
         ERR_clear_error();
         Close(true);
         return;
       }
-      out.clear();
     }
     size_t pending = BIO_ctrl_pending(tls_out);
     if (pending == 0) return;
-    size_t start = wire.size();
-    wire.resize(start + pending);
-    BIO_read(tls_out, &wire[start], static_cast<int>(pending));
+    BIO_read(tls_out, wire.AppendUninitialized(pending),
+             static_cast<int>(pending));
     WriteWire(&wire);
     return;
   }
@@ -1523,36 +1683,38 @@ void Connection::FlushOut() {
 }
 
 // Writes `data` to the socket now or queues it, and leaves `data` empty.
-void Connection::WriteWire(std::string* data) {
-  std::string& bytes = *data;
-  if (bytes.empty()) return;
-  size_t offset = 0;
+void Connection::WriteWire(OutQueue* data) {
+  if (data->empty()) return;
+  MaybeStackBuffer<uv_buf_t, 16> bufs(data->Count());
   if (writes_in_flight == 0) {
-    uv_buf_t buf = uv_buf_init(bytes.data(), bytes.size());
-    int r = uv_try_write(stream(), &buf, 1);
-    if (r == static_cast<int>(bytes.size())) {
-      bytes.clear();
+    size_t count = 0;
+    data->ForEach([&](const char* bytes, size_t length) {
+      bufs[count++] = uv_buf_init(const_cast<char*>(bytes), length);
+    });
+    int r = uv_try_write(stream(), *bufs, count);
+    if (r >= 0 && static_cast<size_t>(r) == data->size()) {
+      data->clear();
       Touch();
       CheckDrain();
       return;
     }
     if (r < 0 && r != UV_EAGAIN && r != UV_ENOSYS) {
-      bytes.clear();
+      data->clear();
       Close(true);
       return;
     }
-    if (r > 0) offset = r;
+    if (r > 0) data->Consume(r);
   }
   WriteReq* w = new WriteReq();
   w->conn = this;
-  if (offset == 0) {
-    w->data.swap(bytes);
-  } else {
-    w->data.assign(bytes, offset, std::string::npos);
-    bytes.clear();
+  w->data = data->Take();
+  size_t count = w->data.size();
+  bufs.AllocateSufficientStorage(count);
+  for (size_t i = 0; i < count; i++) {
+    bufs[i] = uv_buf_init(const_cast<char*>(w->data[i].data()),
+                          w->data[i].size());
   }
-  uv_buf_t buf = uv_buf_init(w->data.data(), w->data.size());
-  int err = uv_write(&w->req, stream(), &buf, 1, AfterWrite);
+  int err = uv_write(&w->req, stream(), *bufs, count, AfterWrite);
   if (err != 0) {
     delete w;
     Close(true);
@@ -1960,7 +2122,7 @@ void BatchServer::WriteHead(Connection* conn,
                             uint32_t head_length,
                             uint32_t body_length,
                             bool complete) {
-  std::string& out = conn->Target(ex);
+  OutQueue& out = conn->Target(ex);
   ex->response_started = true;
   const bool status_no_body =
       status == 204 || status == 304 || (status >= 100 && status < 200);
@@ -2004,22 +2166,45 @@ void BatchServer::WriteHead(Connection* conn,
   out.append("\r\n");
 }
 
-static inline void AppendChunk(std::string* out,
-                               Exchange* ex,
-                               const uint8_t* data,
-                               uint32_t len) {
-  if (ex->response_no_body || len == 0) return;
-  if (ex->chunked) {
-    AppendHex(out, len);
-    out->append("\r\n");
-    out->append(reinterpret_cast<const char*>(data), len);
-    out->append("\r\n");
+// A response body: bytes of the batch, or JavaScript memory kept alive by
+// `store`.
+struct Body {
+  const uint8_t* data = nullptr;
+  uint32_t length = 0;
+  std::shared_ptr<BackingStore> store;
+  Local<String> string;
+  enum encoding encoding = UTF8;
+};
+
+static inline void AppendBody(OutQueue* out, const Body& body) {
+  if (!body.string.IsEmpty()) {
+    if (body.length == 0) return;
+    Isolate* isolate = Isolate::GetCurrent();
+    char* dest = out->AppendAllocated(body.length);
+    size_t written = StringBytes::Write(
+        isolate, dest, body.length, body.string, body.encoding);
+    CHECK_EQ(written, body.length);
+  } else if (body.store) {
+    out->AppendExternal(
+        body.store, reinterpret_cast<const char*>(body.data), body.length);
   } else {
-    out->append(reinterpret_cast<const char*>(data), len);
+    out->append(reinterpret_cast<const char*>(body.data), body.length);
   }
 }
 
-static inline void EndResponse(std::string* out, Exchange* ex) {
+static inline void AppendChunk(OutQueue* out, Exchange* ex, const Body& body) {
+  if (ex->response_no_body || body.length == 0) return;
+  if (ex->chunked) {
+    AppendHex(out, body.length);
+    out->append("\r\n");
+    AppendBody(out, body);
+    out->append("\r\n");
+  } else {
+    AppendBody(out, body);
+  }
+}
+
+static inline void EndResponse(OutQueue* out, Exchange* ex) {
   if (ex->chunked && !ex->response_no_body) out->append("0\r\n\r\n");
   ex->response_done = true;
 }
@@ -2032,21 +2217,56 @@ static inline void MarkTouched(std::vector<Connection*>* touched,
   }
 }
 
-void BatchServer::ApplyResponses(const uint8_t* data, size_t len) {
+void BatchServer::ApplyResponses(const uint8_t* data,
+                                 size_t len,
+                                 Local<Array> externals) {
   UpdateDate();
+  Local<Context> context = env()->context();
   const uint8_t* p = data;
   const uint8_t* end = data + len;
   while (static_cast<size_t>(end - p) >= kResponsePrefix) {
     uint8_t op = p[0];
+    const bool external = op & kOpExternalBody;
+    const bool latin1 = op & kOpLatin1Body;
+    op &= ~(kOpExternalBody | kOpLatin1Body);
     uint8_t flags = p[1];
     uint16_t status = ReadU16(p + 2);
     uint32_t id = ReadU32(p + 4);
     uint32_t head_length = ReadU32(p + 8);
     uint32_t body_length = ReadU32(p + 12);
     const uint8_t* head = p + kResponsePrefix;
-    uint64_t record = kResponsePrefix + uint64_t{head_length} + body_length;
+    uint64_t record = kResponsePrefix + uint64_t{head_length} +
+                      (external ? 4 : body_length);
     if (record > static_cast<uint64_t>(end - p)) break;
-    const uint8_t* body = head + head_length;
+    Body body;
+    body.data = head + head_length;
+    body.length = body_length;
+    if (external) {
+      Local<Value> value;
+      if (externals.IsEmpty() ||
+          !externals->Get(context, ReadU32(body.data)).ToLocal(&value)) {
+        break;
+      }
+      if (value->IsString()) {
+        body.string = value.As<String>();
+        body.encoding = latin1 ? LATIN1 : UTF8;
+        size_t size;
+        if (!StringBytes::Size(env()->isolate(), body.string, body.encoding)
+                 .To(&size) ||
+            size > UINT32_MAX) {
+          break;
+        }
+        body.length = static_cast<uint32_t>(size);
+      } else if (value->IsArrayBufferView()) {
+        Local<ArrayBufferView> view = value.As<ArrayBufferView>();
+        CHECK_EQ(view->ByteLength(), body_length);
+        body.store = view->Buffer()->GetBackingStore();
+        body.data = static_cast<const uint8_t*>(body.store->Data()) +
+                    view->ByteOffset();
+      } else {
+        break;
+      }
+    }
     p += (record + 3) & ~uint64_t{3};
     if (p > end) p = end;
 
@@ -2056,7 +2276,7 @@ void BatchServer::ApplyResponses(const uint8_t* data, size_t len) {
       if (op == kOpShutdown) {
         conn->shutdown_requested = true;
       } else {
-        conn->out.append(reinterpret_cast<const char*>(body), body_length);
+        AppendBody(&conn->out, body);
       }
       MarkTouched(&touched_, conn);
       continue;
@@ -2067,20 +2287,20 @@ void BatchServer::ApplyResponses(const uint8_t* data, size_t len) {
     Connection* conn = it->second;
     Exchange* ex = conn->Find(id);
     if (conn->closing || ex == nullptr || ex->response_done) continue;
-    std::string& out = conn->Target(ex);
+    OutQueue& out = conn->Target(ex);
 
     switch (op) {
       case kOpComplete:
-        WriteHead(conn, ex, flags, status, head, head_length, body_length,
+        WriteHead(conn, ex, flags, status, head, head_length, body.length,
                   true);
-        AppendChunk(&out, ex, body, body_length);
+        AppendChunk(&out, ex, body);
         EndResponse(&out, ex);
         break;
       case kOpHead:
         WriteHead(conn, ex, flags, status, head, head_length, 0, false);
         break;
       case kOpData:
-        AppendChunk(&out, ex, body, body_length);
+        AppendChunk(&out, ex, body);
         break;
       case kOpEnd:
         if (flags & kUserConnectionClose) ex->close_after = true;
@@ -2088,7 +2308,7 @@ void BatchServer::ApplyResponses(const uint8_t* data, size_t len) {
         break;
       case kOpRaw:
         ex->response_started = true;
-        out.append(reinterpret_cast<const char*>(body), body_length);
+        AppendBody(&out, body);
         break;
       case kOpDestroy:
         conn->out.clear();
@@ -2555,7 +2775,7 @@ void BatchServer::GetSockName(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(err);
 }
 
-// writeResponses(buffer, length)
+// writeResponses(buffer, length[, externals])
 void BatchServer::Apply(const FunctionCallbackInfo<Value>& args) {
   BatchServer* server;
   ASSIGN_OR_RETURN_UNWRAP(&server, args.This());
@@ -2564,7 +2784,9 @@ void BatchServer::Apply(const FunctionCallbackInfo<Value>& args) {
   ArrayBufferViewContents<uint8_t> buffer(args[0]);
   uint32_t length = args[1].As<Uint32>()->Value();
   CHECK_LE(length, buffer.length());
-  server->ApplyResponses(buffer.data(), length);
+  Local<Array> externals;
+  if (args[2]->IsArray()) externals = args[2].As<Array>();
+  server->ApplyResponses(buffer.data(), length, externals);
 }
 
 // Stops accepting connections and closes the idle ones.
@@ -2798,8 +3020,7 @@ void BatchServer::SetKeepAlive(const FunctionCallbackInfo<Value>& args) {
 void BatchServer::WriteQueueSize(const FunctionCallbackInfo<Value>& args) {
   Connection* conn = ConnectionFromArgs(args);
   if (conn == nullptr) return args.GetReturnValue().Set(0);
-  args.GetReturnValue().Set(static_cast<double>(
-      uv_stream_get_write_queue_size(conn->stream()) + conn->out.size()));
+  args.GetReturnValue().Set(static_cast<double>(conn->PendingOutput()));
 }
 
 // watchDrain(connectionId): a kDrain record follows when the write queue is
