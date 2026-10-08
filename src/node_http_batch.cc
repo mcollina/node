@@ -591,6 +591,13 @@ struct Connection {
 
   bool CanParseMore() const;
   size_t PendingOutput() const;
+  bool IsSecure() const {
+#if HAVE_OPENSSL
+    return ssl != nullptr;
+#else
+    return false;
+#endif
+  }
   void Execute(const char* data, size_t len);
   void Feed(const char* data, size_t len);
   void Advance();
@@ -1989,6 +1996,17 @@ void BatchServer::Flush() {
     DeliverBatch();
   }
   ProcessEof();
+  // Aborts of connections whose grace ended go out now rather than one loop
+  // iteration later, like socketOnEnd() in node:http.
+  if (!heads_.empty() || !bodies_.empty()) {
+    for (auto& entry : pushed_) {
+      if (entry.first == nullptr) continue;
+      Exchange* ex = entry.first->Find(entry.second);
+      if (ex != nullptr) ex->delivered = true;
+    }
+    pushed_.clear();
+    DeliverBatch();
+  }
 }
 
 // After the client ends its side, node:http still answers the requests it
@@ -2014,7 +2032,14 @@ void BatchServer::ProcessEof() {
                !conn->exchanges.front().response_done) {
       if (conn->eof_grace) {
         conn->AbortAll();
-        conn->Shutdown();
+        // The client is gone and nothing is left to send: closing now tells
+        // JavaScript in this pass instead of after a shutdown round trip.
+        if (conn->writes_in_flight == 0 && conn->PendingOutput() == 0 &&
+            !conn->IsSecure()) {
+          conn->Close(true);
+        } else {
+          conn->Shutdown();
+        }
         continue;
       }
       conn->eof_grace = true;

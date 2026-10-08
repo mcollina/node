@@ -366,6 +366,14 @@ test('maxRequestsPerSocket answers 503 past the limit', async () => {
   await stop(server);
 });
 
+test('_handle is set while listening', async () => {
+  const { server } = await start(common.mustNotCall());
+  // Supertest closes servers only when they have one.
+  assert.ok(server._handle);
+  await stop(server);
+  assert.strictEqual(server._handle, null);
+});
+
 (async () => {
   for (const { name, fn } of tests) {
     try {
