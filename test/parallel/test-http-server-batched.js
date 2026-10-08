@@ -42,8 +42,12 @@ function raw(port, write, until) {
 }
 
 const tests = [];
-function test(name, fn) {
-  tests.push({ name, fn });
+function test(name, options, fn) {
+  if (fn === undefined) {
+    fn = options;
+    options = {};
+  }
+  if (!options.skip) tests.push({ name, fn });
 }
 
 test('serves IncomingMessage and ServerResponse objects', async () => {
@@ -59,7 +63,7 @@ test('serves IncomingMessage and ServerResponse objects', async () => {
     headers: { 'x-test': 'yes' },
   });
   assert.strictEqual(response.status, 200);
-  assert.strictEqual(response.headers.get('keep-alive'), 'timeout=5');
+  assert.strictEqual(response.headers.get('keep-alive'), 'timeout=65');
   assert.strictEqual(response.headers.get('content-length'), '14');
   assert.strictEqual(await response.text(), 'GET /a?b=1 yes');
   await stop(server);
@@ -186,6 +190,179 @@ test('a client going away aborts the request in flight', async () => {
     socket.write('GET / HTTP/1.1\r\nHost: x\r\n\r\n');
   }, (received) => received.includes('partial'));
   await promise;
+  await stop(server);
+});
+
+test('servers and sockets pass the node:http and net checks', async () => {
+  const { server, port } = await start(common.mustCall((req, res) => {
+    assert.ok(req.socket instanceof net.Socket);
+    assert.strictEqual(req.socket, connection);
+    res.end('ok');
+  }));
+  assert.ok(server instanceof http.Server);
+  assert.ok(server instanceof net.Server);
+  let connection;
+  server.on('connection', common.mustCall((socket) => {
+    connection = socket;
+  }));
+  const response = await fetch(`http://127.0.0.1:${port}/`);
+  assert.strictEqual(await response.text(), 'ok');
+  await stop(server);
+});
+
+test('clientError listeners answer on the socket', async () => {
+  const { server, port } = await start(common.mustNotCall());
+  server.on('clientError', common.mustCall((err, socket) => {
+    assert.strictEqual(err.code, 'HPE_INVALID_METHOD');
+    assert.strictEqual(err.bytesParsed, 1);
+    socket.end('HTTP/1.1 418 I\'m a Teapot\r\nConnection: close\r\n\r\n');
+  }));
+  const text = await raw(port, (socket) => socket.write('FOO / HTTP/1.1\r\n\r\n'));
+  assert.strictEqual(text, 'HTTP/1.1 418 I\'m a Teapot\r\nConnection: close\r\n\r\n');
+  await stop(server);
+});
+
+test('checkContinue decides about 100 Continue', async () => {
+  const { server, port } = await start(common.mustNotCall());
+  server.on('checkContinue', common.mustCall((req, res) => {
+    res.writeContinue();
+    req.setEncoding('latin1');
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => res.end(body.toUpperCase()));
+  }));
+  const text = await raw(port, common.mustCall((socket) => {
+    socket.write('POST / HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\n' +
+                 'Content-Length: 5\r\nConnection: close\r\n\r\n');
+    socket.once('data', common.mustCall((chunk) => {
+      assert.strictEqual(chunk, 'HTTP/1.1 100 Continue\r\n\r\n');
+      socket.write('hello');
+    }));
+  }));
+  assert.match(text, /\r\n\r\nHELLO$/);
+  await stop(server);
+});
+
+test('idle sockets time out', async () => {
+  const { promise, resolve } = Promise.withResolvers();
+  const { server, port } = await start(common.mustNotCall());
+  server.setTimeout(50, common.mustCall((socket) => {
+    assert.ok(socket instanceof net.Socket);
+    socket.destroy();
+    resolve();
+  }));
+  const socket = net.connect(port, '127.0.0.1');
+  socket.on('error', () => {});
+  socket.write('GET / HTTP/1.1\r\n');
+  await promise;
+  socket.destroy();
+  await stop(server);
+});
+
+test('maxConnections drops connections over the limit', async () => {
+  const { server, port } = await start(common.mustNotCall());
+  server.maxConnections = 1;
+  const { promise, resolve } = Promise.withResolvers();
+  server.on('drop', common.mustCall((data) => {
+    assert.strictEqual(data.remoteAddress, '127.0.0.1');
+    resolve();
+  }));
+  const first = net.connect(port, '127.0.0.1');
+  await new Promise((r) => first.on('connect', r));
+  const second = net.connect(port, '127.0.0.1');
+  second.on('error', () => {});
+  await promise;
+  first.destroy();
+  second.destroy();
+  await stop(server);
+});
+
+test('listens on Unix sockets and existing handles', {
+  skip: common.isWindows,
+}, async () => {
+  const tmpdir = require('../common/tmpdir');
+  tmpdir.refresh();
+  const handler = common.mustCall((req, res) => res.end('ok'), 2);
+  const pipe = http.createServer({ batched: true }, handler);
+  await new Promise((resolve) => pipe.listen(common.PIPE, resolve));
+  assert.strictEqual(pipe.address(), common.PIPE);
+  const body = await new Promise((resolve) => {
+    http.get({ socketPath: common.PIPE }, (res) => {
+      res.setEncoding('latin1');
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => resolve(data));
+    });
+  });
+  assert.strictEqual(body, 'ok');
+  await stop(pipe);
+
+  const tcp = net.createServer();
+  await new Promise((resolve) => tcp.listen(0, '127.0.0.1', resolve));
+  const fromHandle = http.createServer({ batched: true }, handler);
+  await new Promise((resolve) => fromHandle.listen({ handle: tcp._handle }, resolve));
+  const response = await fetch(`http://127.0.0.1:${fromHandle.address().port}/`);
+  assert.strictEqual(await response.text(), 'ok');
+  await stop(fromHandle);
+});
+
+test('responses wait for slow clients', async () => {
+  const chunk = Buffer.alloc(1024 * 1024, 'x');
+  let socket;
+  const { server, port } = await start(common.mustCall((req, res) => {
+    let writes = 0;
+    while (res.write(chunk)) writes++;
+    assert.ok(writes < 64);
+    res.once('drain', common.mustCall(() => res.end()));
+    // The client starts reading once the server is backed up.
+    socket.resume();
+  }));
+  let received = 0;
+  await raw(port, (s) => {
+    socket = s;
+    s.pause();
+    s.write('GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n');
+    s.on('data', (data) => { received += data.length; });
+  });
+  assert.ok(received > chunk.length);
+  await stop(server);
+});
+
+test('upgrade requests with a body hand over a stream', async () => {
+  const { server, port } = await start(common.mustNotCall());
+  server.on('upgrade', common.mustCall((req, stream) => {
+    let body = '';
+    req.setEncoding('latin1');
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', common.mustCall(() => {
+      assert.strictEqual(body, 'abc');
+      stream.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: echo\r\n' +
+                   'Connection: Upgrade\r\n\r\n');
+      stream.on('data', (data) => stream.write(data));
+      stream.on('end', () => stream.end());
+    }));
+  }));
+  const text = await raw(port, (socket) => {
+    socket.write('POST / HTTP/1.1\r\nHost: x\r\nUpgrade: echo\r\n' +
+                 'Connection: Upgrade\r\nContent-Length: 3\r\n\r\nabcafter');
+  }, (received) => received.endsWith('after'));
+  assert.match(text, /^HTTP\/1\.1 101 Switching Protocols\r\n/);
+  assert.match(text, /\r\n\r\nafter$/);
+  await stop(server);
+});
+
+test('maxRequestsPerSocket answers 503 past the limit', async () => {
+  const { server, port } = await start(common.mustCall((req, res) => {
+    res.end('ok');
+  }));
+  server.maxRequestsPerSocket = 1;
+  server.on('dropRequest', common.mustCall());
+  const text = await raw(port, (socket) => {
+    socket.write('GET / HTTP/1.1\r\nHost: x\r\n\r\n' +
+                 'GET / HTTP/1.1\r\nHost: x\r\n\r\n');
+  }, (received) => received.includes('503'));
+  assert.match(text, /^HTTP\/1\.1 200 OK\r\n/);
+  assert.match(text, /HTTP\/1\.1 503 Service Unavailable\r\n/);
   await stop(server);
 });
 
