@@ -24,6 +24,10 @@
 //   head bytes (status line and user headers, CRLF terminated), body bytes.
 
 #include "async_context_frame.h"
+#if HAVE_OPENSSL
+#include "crypto/crypto_common.h"
+#include "crypto/crypto_context.h"
+#endif
 #include "base_object-inl.h"
 #include "env-inl.h"
 #include "llhttp.h"
@@ -44,6 +48,11 @@
 
 #ifndef _WIN32
 #include <unistd.h>  // dup()
+#endif
+
+#if HAVE_OPENSSL
+#include <openssl/bio.h>
+#include <openssl/ssl.h>
 #endif
 
 namespace node {
@@ -287,6 +296,16 @@ struct Connection {
   bool reading = false;
   bool touched = false;
   bool shutdown_requested = false;
+
+#if HAVE_OPENSSL
+  // TLS runs over memory BIOs: ciphertext read from the socket goes into
+  // tls_in, ciphertext to send is drained from tls_out into `wire`.
+  ncrypto::SSLPointer ssl;  // Owns the BIOs too.
+  BIO* tls_in = nullptr;
+  BIO* tls_out = nullptr;
+  std::string wire;
+  bool tls_verified = false;
+#endif
   bool closing = false;
   bool announced = false;    // JavaScript has seen this connection.
   bool user_paused = false;  // JavaScript asked to stop reading.
@@ -309,6 +328,9 @@ struct Connection {
   void StartReading();
   void StopReading();
   void FlushOut();
+  void WriteWire(std::string* data);
+  void OnEof();
+  void OnCiphertext(const char* data, size_t len);
   void Shutdown();
   void Close(bool notify);
   void FinishValue();
@@ -344,6 +366,9 @@ class BatchServer : public BaseObject {
   static void PauseConnection(const FunctionCallbackInfo<Value>& args);
   static void ResumeConnection(const FunctionCallbackInfo<Value>& args);
   static void ConnectionAddress(const FunctionCallbackInfo<Value>& args);
+  static void SetSecureContext(const FunctionCallbackInfo<Value>& args);
+  static void PeerCertificate(const FunctionCallbackInfo<Value>& args);
+  static void PeerVerifyError(const FunctionCallbackInfo<Value>& args);
 
   void MemoryInfo(MemoryTracker* tracker) const override;
   SET_MEMORY_INFO_NAME(BatchServer)
@@ -475,6 +500,30 @@ class BatchServer : public BaseObject {
   std::string date_;
   uint32_t next_id_ = 0;
   uint32_t next_connection_id_ = 0;
+#if HAVE_OPENSSL
+  // Set for HTTPS: every accepted connection gets an SSL from it.
+  BaseObjectPtr<crypto::SecureContext> secure_context_;
+  bool request_cert_ = false;
+  bool reject_unauthorized_ = false;
+
+ public:
+  // With rejectUnauthorized, a client certificate that failed verification
+  // ends the connection before any request is read, as tls.Server does.
+  bool PeerAccepted(Connection* conn) {
+    if (!request_cert_ || !reject_unauthorized_) return true;
+    return VerifyError(conn) == X509_V_OK;
+  }
+
+  static long VerifyError(Connection* conn) {  // NOLINT(runtime/int)
+    // TLS 1.3 resumption reports X509_V_OK without a certificate.
+    if (SSL_get0_peer_certificate(conn->ssl) == nullptr)
+      return X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT;
+    return conn->ssl.verifyPeerCertificate().value_or(
+        X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT);
+  }
+
+ private:
+#endif
   bool flush_scheduled_ = false;
   bool listening_ = false;
   bool closing_ = false;
@@ -791,26 +840,76 @@ static void OnRead(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
   if (conn->closing) return;
   if (nread > 0) {
     conn->last_active = uv_now(conn->server->loop());
+#if HAVE_OPENSSL
+    if (conn->ssl) {
+      conn->OnCiphertext(buf->base, static_cast<size_t>(nread));
+      return;
+    }
+#endif
     conn->Feed(buf->base, static_cast<size_t>(nread));
   } else if (nread == UV_EOF) {
-    conn->StopReading();
-    conn->read_eof = true;
-    if (conn->id != 0 && !conn->request_complete) {
-      // The request body was cut short.
-      if (!conn->response_done) {
-        conn->server->PushBody(conn->id, nullptr, kBodyAbort);
-        conn->response_done = true;
-      }
-      conn->Shutdown();
-    } else if (conn->id == 0 && conn->pending_input.empty()) {
-      conn->Shutdown();
-    } else {
-      conn->server->AddEof(conn);
-    }
+    conn->OnEof();
   } else if (nread < 0) {
     conn->Close(true);
   }
 }
+
+void Connection::OnEof() {
+  StopReading();
+  read_eof = true;
+  if (id != 0 && !request_complete) {
+    // The request body was cut short.
+    if (!response_done) {
+      server->PushBody(id, nullptr, kBodyAbort);
+      response_done = true;
+    }
+    Shutdown();
+  } else if (id == 0 && pending_input.empty()) {
+    Shutdown();
+  } else {
+    server->AddEof(this);
+  }
+}
+
+#if HAVE_OPENSSL
+// Decrypts everything the socket delivered. The plaintext goes through the
+// read slab, which is free again once the ciphertext is in tls_in.
+void Connection::OnCiphertext(const char* data, size_t len) {
+  if (BIO_write(tls_in, data, static_cast<int>(len)) != static_cast<int>(len)) {
+    Close(true);
+    return;
+  }
+  char* plain = server->slab();
+  for (;;) {
+    int n = SSL_read(ssl, plain, kSlabSize);
+    if (n > 0) {
+      if (!tls_verified) {
+        tls_verified = true;
+        if (!server->PeerAccepted(this)) {
+          Close(true);
+          return;
+        }
+      }
+      Feed(plain, static_cast<size_t>(n));
+      if (closing) return;
+      continue;
+    }
+    int err = SSL_get_error(ssl, n);
+    if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) break;
+    if (err == SSL_ERROR_ZERO_RETURN) {  // close_notify
+      FlushOut();
+      OnEof();
+      return;
+    }
+    // Handshake failure or corrupted record: send the alert, if any.
+    FlushOut();
+    Shutdown();
+    return;
+  }
+  // Handshake messages and session tickets.
+  FlushOut();
+}
+#endif
 
 void Connection::StartReading() {
   if (reading || closing || user_paused) return;
@@ -838,10 +937,37 @@ static void AfterWrite(uv_write_t* req, int status) {
 }
 
 void Connection::FlushOut() {
-  if (out.empty() || closing) {
+  if (closing) {
     out.clear();
     return;
   }
+#if HAVE_OPENSSL
+  if (ssl) {
+    if (!out.empty()) {
+      // Memory BIOs never apply backpressure, so this writes everything.
+      if (SSL_write(ssl, out.data(), static_cast<int>(out.size())) <= 0) {
+        out.clear();
+        Close(true);
+        return;
+      }
+      out.clear();
+    }
+    size_t pending = BIO_ctrl_pending(tls_out);
+    if (pending == 0) return;
+    size_t start = wire.size();
+    wire.resize(start + pending);
+    BIO_read(tls_out, &wire[start], static_cast<int>(pending));
+    WriteWire(&wire);
+    return;
+  }
+#endif
+  WriteWire(&out);
+}
+
+// Writes `data` to the socket now or queues it, and leaves `data` empty.
+void Connection::WriteWire(std::string* data) {
+  std::string& out = *data;
+  if (out.empty()) return;
   size_t offset = 0;
   if (writes_in_flight == 0) {
     uv_buf_t buf = uv_buf_init(out.data(), out.size());
@@ -903,6 +1029,13 @@ static void AfterShutdown(uv_shutdown_t* req, int status) {
 
 void Connection::Shutdown() {
   if (closing) return;
+#if HAVE_OPENSSL
+  if (ssl && SSL_is_init_finished(ssl)) {
+    SSL_shutdown(ssl);
+    FlushOut();
+    if (closing) return;
+  }
+#endif
   StopReading();
   closing = true;
   uv_shutdown_t* req = new uv_shutdown_t();
@@ -1330,6 +1463,33 @@ void BatchServer::OnConnection(uv_stream_t* listener, int status) {
   }
   uv_tcp_nodelay(&conn->handle, 1);
   llhttp_init(&conn->parser, HTTP_REQUEST, Settings());
+#if HAVE_OPENSSL
+  if (server->secure_context_) {
+    conn->ssl = server->secure_context_->CreateSSL();
+    conn->tls_in = BIO_new(BIO_s_mem());
+    conn->tls_out = BIO_new(BIO_s_mem());
+    if (!conn->ssl || conn->tls_in == nullptr || conn->tls_out == nullptr) {
+      BIO_free(conn->tls_in);
+      BIO_free(conn->tls_out);
+      conn->closing = true;
+      conn->server = nullptr;
+      server->env()->CloseHandle(&conn->handle, OnConnectionClosed);
+      return;
+    }
+    // An empty input BIO means "wait for more", not end of stream.
+    BIO_set_mem_eof_return(conn->tls_in, -1);
+    SSL_set_bio(conn->ssl, conn->tls_in, conn->tls_out);
+    SSL_set_accept_state(conn->ssl);
+    if (server->request_cert_) {
+      // Like TLSWrap: the handshake always goes through, and the result of
+      // the verification is checked once it is done.
+      int mode = SSL_VERIFY_PEER;
+      if (server->reject_unauthorized_)
+        mode |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+      SSL_set_verify(conn->ssl, mode, [](int, X509_STORE_CTX*) { return 1; });
+    }
+  }
+#endif
   conn->parser.data = conn;
   conn->head.reserve(512);
   conn->out.reserve(512);
@@ -1586,6 +1746,10 @@ void BatchServer::Detach(const FunctionCallbackInfo<Value>& args) {
   // Queued writes would be cancelled by the close below.
   if (conn->writes_in_flight != 0 || !conn->out.empty())
     return args.GetReturnValue().Set(UV_EBUSY);
+#if HAVE_OPENSSL
+  // The TLS session lives here; there is no descriptor to hand over.
+  if (conn->ssl) return args.GetReturnValue().Set(UV_ENOTSUP);
+#endif
 #ifdef _WIN32
   args.GetReturnValue().Set(UV_ENOTSUP);
 #else
@@ -1644,6 +1808,80 @@ void BatchServer::ConnectionAddress(const FunctionCallbackInfo<Value>& args) {
   args.GetReturnValue().Set(err);
 }
 
+#if HAVE_OPENSSL
+// Only HTTP/1.1 is served. Clients that offer other protocols only get no
+// ALPN answer and may give up.
+static int SelectALPN(SSL* ssl,
+                      const unsigned char** out,
+                      unsigned char* outlen,
+                      const unsigned char* in,
+                      unsigned int inlen,
+                      void* arg) {
+  static const unsigned char kHttp11[] = {
+      8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
+  unsigned char* selected;
+  if (SSL_select_next_proto(&selected,
+                            outlen,
+                            kHttp11,
+                            sizeof(kHttp11),
+                            in,
+                            inlen) != OPENSSL_NPN_NEGOTIATED) {
+    return SSL_TLSEXT_ERR_NOACK;
+  }
+  *out = selected;
+  return SSL_TLSEXT_ERR_OK;
+}
+#endif
+
+// setSecureContext(context, requestCert, rejectUnauthorized) makes the
+// server speak TLS. `context` is the
+// native handle of a SecureContext owned by this server alone, since its
+// ALPN callback is replaced.
+void BatchServer::SetSecureContext(const FunctionCallbackInfo<Value>& args) {
+  BatchServer* server;
+  ASSIGN_OR_RETURN_UNWRAP(&server, args.This());
+#if HAVE_OPENSSL
+  CHECK(args[0]->IsObject());
+  crypto::SecureContext* context;
+  ASSIGN_OR_RETURN_UNWRAP(&context, args[0].As<Object>());
+  SSL_CTX_set_alpn_select_cb(context->ctx().get(), SelectALPN, nullptr);
+  server->secure_context_.reset(context);
+  server->request_cert_ = args[1]->IsTrue();
+  server->reject_unauthorized_ = args[2]->IsTrue();
+#else
+  UNREACHABLE();
+#endif
+}
+
+// peerCertificate(connectionId, detailed), like TLSSocket#getPeerCertificate.
+void BatchServer::PeerCertificate(const FunctionCallbackInfo<Value>& args) {
+#if HAVE_OPENSSL
+  Connection* conn = ConnectionFromArgs(args);
+  if (conn == nullptr || !conn->ssl) return;
+  Local<Value> ret;
+  if (crypto::GetPeerCert(conn->env, conn->ssl, !args[1]->IsTrue(), true)
+          .ToLocal(&ret)) {
+    args.GetReturnValue().Set(ret);
+  }
+#endif
+}
+
+// peerVerifyError(connectionId) returns null or the verification error code
+// of the client certificate.
+void BatchServer::PeerVerifyError(const FunctionCallbackInfo<Value>& args) {
+#if HAVE_OPENSSL
+  Connection* conn = ConnectionFromArgs(args);
+  if (conn == nullptr || !conn->ssl) return;
+  long err = VerifyError(conn);  // NOLINT(runtime/int)
+  if (err == X509_V_OK) return args.GetReturnValue().SetNull();
+  Local<Value> code;
+  if (crypto::GetValidationErrorCode(conn->env, static_cast<int>(err))
+          .ToLocal(&code)) {
+    args.GetReturnValue().Set(code);
+  }
+#endif
+}
+
 static void Initialize(Local<Object> target,
                        Local<Value> unused,
                        Local<Context> context,
@@ -1666,6 +1904,10 @@ static void Initialize(Local<Object> target,
   SetProtoMethod(isolate, t, "unref", BatchServer::Unref);
   SetProtoMethod(isolate, t, "setTimeouts", BatchServer::SetTimeouts);
   SetProtoMethod(isolate, t, "detach", BatchServer::Detach);
+  SetProtoMethod(
+      isolate, t, "setSecureContext", BatchServer::SetSecureContext);
+  SetProtoMethod(isolate, t, "peerCertificate", BatchServer::PeerCertificate);
+  SetProtoMethod(isolate, t, "peerVerifyError", BatchServer::PeerVerifyError);
   SetProtoMethod(isolate, t, "closeConnection", BatchServer::CloseConnection);
   SetProtoMethod(isolate, t, "pauseConnection", BatchServer::PauseConnection);
   SetProtoMethod(
@@ -1711,6 +1953,9 @@ static void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
   registry->Register(BatchServer::Unref);
   registry->Register(BatchServer::SetTimeouts);
   registry->Register(BatchServer::Detach);
+  registry->Register(BatchServer::SetSecureContext);
+  registry->Register(BatchServer::PeerCertificate);
+  registry->Register(BatchServer::PeerVerifyError);
   registry->Register(BatchServer::CloseConnection);
   registry->Register(BatchServer::PauseConnection);
   registry->Register(BatchServer::ResumeConnection);
