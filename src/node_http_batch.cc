@@ -40,7 +40,7 @@
 //   u8 op, u8 flags, u16 status, u32 id, u32 head_length, u32 body_length,
 //   head bytes (status line and user headers, CRLF terminated), body bytes.
 
-#include "async_context_frame.h"
+#include "async_wrap-inl.h"
 #if HAVE_OPENSSL
 #include "crypto/crypto_common.h"
 #include "crypto/crypto_context.h"
@@ -477,7 +477,9 @@ struct Connection {
   }
 };
 
-class BatchServer : public BaseObject {
+// The listening server is an async resource like a net.Server handle
+// (TCPSERVERWRAP): batches run in its context.
+class BatchServer : public AsyncWrap {
  public:
   BatchServer(Environment* env,
               Local<Object> object,
@@ -666,7 +668,6 @@ class BatchServer : public BaseObject {
 
   Global<Function> on_batch_;
   Global<Function> on_close_;
-  Global<Value> context_frame_;
   std::shared_ptr<BackingStore> shared_;
   char* shared_data_;
   size_t shared_length_;
@@ -743,6 +744,7 @@ class BatchServer : public BaseObject {
                        unsigned int inlen);
   uint32_t reneg_limit() const { return reneg_limit_; }
   uint64_t reneg_window_ms() const { return reneg_window_ms_; }
+  uint64_t default_timeout() const { return default_timeout_; }
   void InstallContextCallbacks(SSL_CTX* ctx);
 
  private:
@@ -1689,6 +1691,8 @@ static void InfoCallback(const SSL* ssl, int where, int ret) {
   if ((where & SSL_CB_HANDSHAKE_DONE) && !conn->handshake_done) {
     conn->handshake_done = true;
     conn->reneg_window_start = uv_now(conn->server->loop());
+    if (conn->timeout_ms == 0 && conn->server->default_timeout() != 0)
+      conn->SetTimeout(conn->server->default_timeout());
     if (conn->server->flag(kAnnounceSecure)) {
       conn->server->Announce(conn);
       conn->server->PushRecord(conn->connection_id, kSecureConnection);
@@ -1712,12 +1716,10 @@ BatchServer::BatchServer(Environment* env,
                          std::shared_ptr<BackingStore> shared,
                          char* shared_data,
                          size_t shared_length)
-    : BaseObject(env, object),
+    : AsyncWrap(env, object, AsyncWrap::PROVIDER_TCPSERVERWRAP),
       slab_(new char[kSlabSize]),
       on_batch_(env->isolate(), on_batch),
       on_close_(env->isolate(), on_close),
-      context_frame_(env->isolate(),
-                     async_context_frame::current(env->isolate())),
       shared_(std::move(shared)),
       shared_data_(shared_data),
       shared_length_(shared_length),
@@ -1893,14 +1895,7 @@ void BatchServer::DeliverBatch() {
   bodies_.clear();
 
   BaseObjectPtr<BatchServer> strong_ref{this};
-  InternalMakeCallback(env(),
-                       object(),
-                       object(),
-                       on_batch_.Get(isolate),
-                       arraysize(argv),
-                       argv,
-                       {0, 0},
-                       context_frame_.Get(isolate));
+  MakeCallback(on_batch_.Get(isolate), arraysize(argv), argv);
 }
 
 static const char* const kDays[] = {
@@ -2174,7 +2169,10 @@ bool BatchServer::SetupConnection(Connection* conn) {
     Drop(conn);
     return true;
   }
-  if (default_timeout_ != 0) conn->SetTimeout(default_timeout_);
+  // Like the connection listener of https, TLS connections time out once they
+  // are secure, and handshakeTimeout covers the handshake.
+  if (default_timeout_ != 0 && conn->ssl == nullptr)
+    conn->SetTimeout(default_timeout_);
   if (flag(kAnnounceConnections)) Announce(conn);
   conn->StartReading();
   return true;
@@ -2333,14 +2331,7 @@ void BatchServer::MaybeEmitClose() {
     HandleScope handle_scope(env->isolate());
     Context::Scope context_scope(env->context());
     BatchServer* server = strong_ref.get();
-    InternalMakeCallback(env,
-                         server->object(),
-                         server->object(),
-                         server->on_close_.Get(env->isolate()),
-                         0,
-                         nullptr,
-                         {0, 0},
-                         server->context_frame_.Get(env->isolate()));
+    server->MakeCallback(server->on_close_.Get(env->isolate()), 0, nullptr);
   });
 }
 
@@ -2912,14 +2903,7 @@ int BatchServer::CallAlpnCallback(Connection* conn,
     return SSL_TLSEXT_ERR_ALERT_FATAL;
   }
   Local<Value> result;
-  if (!InternalMakeCallback(env(),
-                            object(),
-                            object(),
-                            alpn_callback_.Get(isolate),
-                            arraysize(argv),
-                            argv,
-                            {0, 0},
-                            context_frame_.Get(isolate))
+  if (!MakeCallback(alpn_callback_.Get(isolate), arraysize(argv), argv)
            .ToLocal(&result) ||
       !result->IsNumber()) {
     return SSL_TLSEXT_ERR_ALERT_FATAL;
@@ -3042,7 +3026,8 @@ static void Initialize(Local<Object> target,
 
   Local<FunctionTemplate> t = NewFunctionTemplate(isolate, BatchServer::New);
   t->InstanceTemplate()->SetInternalFieldCount(
-      BaseObject::kInternalFieldCount);
+      AsyncWrap::kInternalFieldCount);
+  t->Inherit(AsyncWrap::GetConstructorTemplate(env));
   SetProtoMethod(isolate, t, "listen", BatchServer::Listen);
   SetProtoMethod(isolate, t, "listenPipe", BatchServer::ListenPipe);
   SetProtoMethod(isolate, t, "listenFd", BatchServer::ListenFd);
