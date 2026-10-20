@@ -4443,6 +4443,9 @@ Creating SHAKE-128 and SHAKE-256 digests without an explicit
 
 <!-- YAML
 changes:
+  - version: REPLACEME
+    pr-url: https://github.com/nodejs/node/pull/58535
+    description: Runtime deprecation.
   - version:
      - v24.6.0
      - v22.19.0
@@ -4709,9 +4712,14 @@ successfully before the response closed.
 
 <!-- YAML
 changes:
-  - version: v26.8.2
+  - version: REPLACEME
     pr-url: https://github.com/nodejs/node/pull/64794
     description: Runtime deprecation.
+  - version:
+    - v26.8.2
+    - v24.22.0
+    pr-url: https://github.com/nodejs/node/pull/64794
+    description: Documentation-only.
 -->
 
 Type: Runtime
@@ -4726,7 +4734,9 @@ calling or overriding `_listen2`.
 
 <!-- YAML
 changes:
-  - version: v26.8.2
+  - version:
+    - v26.8.2
+    - v24.22.0
     pr-url: https://github.com/nodejs/node/pull/64342
     description: Documentation-only deprecation.
 -->

@@ -215,8 +215,9 @@ class EnvironmentOptions : public Options {
   DEFINE_BOOL_FIELD(experimental_websocket) = true;
   DEFINE_BOOL_FIELD(experimental_sqlite) = HAVE_SQLITE;
   DEFINE_BOOL_FIELD(experimental_stream_iter) = EXPERIMENTALS_DEFAULT_VALUE;
-  DEFINE_BOOL_FIELD(experimental_vfs) = EXPERIMENTALS_DEFAULT_VALUE;
+  DEFINE_BOOL_FIELD(experimental_vfs) = true;
   DEFINE_BOOL_FIELD(vfs_load) = false;
+  DEFINE_BOOL_FIELD(sea_vfs_archive) = false;
   DEFINE_BOOL_FIELD(webstorage) = HAVE_SQLITE;
   DEFINE_BOOL_FIELD(experimental_dtls) = EXPERIMENTALS_DEFAULT_VALUE;
   DEFINE_BOOL_FIELD(experimental_quic) = EXPERIMENTALS_DEFAULT_VALUE;
@@ -297,6 +298,8 @@ class EnvironmentOptions : public Options {
   DEFINE_BOOL_FIELD(tls_max_v1_2) = false;
   DEFINE_BOOL_FIELD(tls_max_v1_3) = false;
   DEFINE_BOOL_FIELD(strip_types) = HAVE_AMARO;
+  DEFINE_BOOL_FIELD(experimental_strip_private_modules) =
+      EXPERIMENTALS_DEFAULT_VALUE;
   DEFINE_BOOL_FIELD(report_exclude_env) = false;
   DEFINE_BOOL_FIELD(report_exclude_network) = false;
 #if HAVE_INSPECTOR

@@ -317,9 +317,10 @@ void EnvironmentOptions::CheckOptions(std::vector<std::string>* errors,
   }
 
 #ifndef DISABLE_SINGLE_EXECUTABLE_APPLICATION
+  sea_vfs_archive = sea::IsSingleExecutable() &&
+                    sea::FindSingleExecutableResource().use_vfs_archive();
   // The archive takes the mount point reserved for the --vfs-load source.
-  if (!vfs_load_source.empty() && sea::IsSingleExecutable() &&
-      sea::FindSingleExecutableResource().use_vfs_archive()) {
+  if (!vfs_load_source.empty() && sea_vfs_archive) {
     errors->push_back(
         "--vfs-load cannot be used in a single executable application "
         "built with \"vfsArchive\"");
@@ -811,7 +812,8 @@ EnvironmentOptionsParser::EnvironmentOptionsParser() {
   AddOption("--experimental-vfs",
             "experimental node:vfs module",
             BOOL_FIELD(experimental_vfs),
-            kAllowedInEnvvar);
+            kAllowedInEnvvar,
+            true);
   // Choosing the entry point is the command line's alone: an environment
   // variable must not be able to redirect what a `node <args>` invocation runs,
   // so this is rejected in NODE_OPTIONS. The source and whether to run from it
@@ -820,11 +822,12 @@ EnvironmentOptionsParser::EnvironmentOptionsParser() {
   AddOption("--vfs-load",
             "mount a directory or archive as a virtual file system and run the "
             "entry point and module resolution against it instead of the real "
-            "file system (may be given once; requires --experimental-vfs)",
+            "file system (may be given once)",
             &EnvironmentOptions::vfs_load_source,
             kDisallowedInEnvvar);
   AddOption("[vfs_load_set]", "", BOOL_FIELD(vfs_load));
   Implies("--vfs-load", "[vfs_load_set]");
+  AddOption("[sea_vfs_archive]", "", BOOL_FIELD(sea_vfs_archive));
   AddOption("--experimental-quic",
 #ifndef OPENSSL_NO_QUIC
             "experimental QUIC support",
@@ -1476,6 +1479,11 @@ EnvironmentOptionsParser::EnvironmentOptionsParser() {
             kAllowedInEnvvar,
             HAVE_AMARO);
   AddAlias("--experimental-strip-types", "--strip-types");
+  AddOption("--experimental-strip-private-modules",
+            "Type-stripping for TypeScript files under node_modules "
+            "belonging to packages marked \"private\": true",
+            BOOL_FIELD(experimental_strip_private_modules),
+            kAllowedInEnvvar);
   AddOption("--interactive",
             "always enter the REPL even if stdin does not appear "
             "to be a terminal",
